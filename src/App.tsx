@@ -170,6 +170,7 @@ function App() {
   const logoInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const selectionPopupRef = useRef<HTMLDivElement>(null)
+  const selectionScanTimerRef = useRef<number | null>(null)
   const searchFlashTimerRef = useRef<number | null>(null)
   const readingSaveTimerRef = useRef<number | null>(null)
   const openedChatRef = useRef<string>(undefined)
@@ -280,6 +281,9 @@ function App() {
     () => () => {
       if (searchFlashTimerRef.current) {
         window.clearTimeout(searchFlashTimerRef.current)
+      }
+      if (selectionScanTimerRef.current) {
+        window.clearTimeout(selectionScanTimerRef.current)
       }
     },
     [],
@@ -2091,6 +2095,31 @@ function MessageCard({
       : message.role === 'system'
         ? 'System'
         : 'AI'
+  const scanSelection = useCallback(
+    (container: HTMLElement) => {
+      if (!settings.highlightEnabled) return
+      const selection = window.getSelection()
+      const selectedText = selection?.toString().trim()
+      if (!selectedText) return
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : undefined
+      if (!range || !container.contains(range.commonAncestorContainer)) return
+      const rects = Array.from(range.getClientRects()).filter(
+        (rect) => rect.width > 0 && rect.height > 0,
+      )
+      const rect = rects[rects.length - 1] ?? range.getBoundingClientRect()
+      if (!rect || (rect.width <= 0 && rect.height <= 0)) return
+      const x = clamp(rect.left + rect.width / 2, 22, window.innerWidth - 22)
+      const y = clamp(rect.top - 10, 54, window.innerHeight - 12)
+      onSelectText(selectedText, { x, y })
+    },
+    [onSelectText, settings.highlightEnabled],
+  )
+  const scheduleSelectionScan = useCallback(
+    (container: HTMLElement, delay = 120) => {
+      window.setTimeout(() => scanSelection(container), delay)
+    },
+    [scanSelection],
+  )
 
   return (
     <article
@@ -2098,18 +2127,13 @@ function MessageCard({
       data-message-index={message.index}
       className={`message-card role-${message.role}`}
       onMouseUp={(event) => {
-        if (!settings.highlightEnabled) return
         if (event.target instanceof HTMLTextAreaElement) return
-        const selection = window.getSelection()
-        const selectedText = selection?.toString().trim()
-        if (!selectedText) return
-        const range = selection?.rangeCount ? selection.getRangeAt(0) : undefined
-        if (!range || !event.currentTarget.contains(range.commonAncestorContainer)) return
-        const rect = range.getBoundingClientRect()
-        onSelectText(selectedText, {
-          x: rect.left + rect.width / 2,
-          y: Math.max(12, rect.top - 8),
-        })
+        scanSelection(event.currentTarget)
+      }}
+      onTouchEnd={(event) => {
+        if (event.target instanceof HTMLTextAreaElement) return
+        scheduleSelectionScan(event.currentTarget, 120)
+        scheduleSelectionScan(event.currentTarget, 360)
       }}
     >
       <div className="message-head">

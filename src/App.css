@@ -1996,6 +1996,15 @@ input[type='checkbox']:focus-visible {
 /* RESPONSIVE                                                */
 /* ========================================================= */
 @media (max-width: 780px) {
+  .selection-toolbar {
+    transform: translate(-50%, 10px);
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 16px) scale(0.9);
+    }
+  }
   .modal-grid {
     grid-template-columns: 1fr;
   }
