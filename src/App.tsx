@@ -1188,7 +1188,6 @@ function App() {
         ref={fileInputRef}
         className="visually-hidden"
         type="file"
-        accept=".jsonl,application/jsonl,text/plain"
         multiple
         onChange={(event) => void importChatFiles(event.currentTarget.files)}
       />
