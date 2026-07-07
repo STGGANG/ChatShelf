@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:single": "tsc -b && vite build --config vite.single.config.ts && node scripts/inline-single-html.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },
