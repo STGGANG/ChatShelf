@@ -1,0 +1,361 @@
+import type {
+  FontOption,
+  ThemeDefinition,
+  ThemePalette,
+  ViewerSettings,
+} from '../types'
+
+export const pretendardFont: FontOption = {
+  id: 'pretendard',
+  name: 'Pretendard',
+  fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+}
+
+const sans = (fam: string) => `"${fam}", Pretendard, sans-serif`
+const serif = (fam: string) => `"${fam}", "Nanum Myeongjo", serif`
+
+export const builtinFonts: FontOption[] = [
+  pretendardFont,
+  { id: 'suit', name: 'SUIT', fontFamily: sans('Suit') },
+  { id: 'suite', name: 'SUITE', fontFamily: sans('Sweet') },
+  { id: 'wanted', name: 'Wanted Sans', fontFamily: sans('Wanted Sans Variable') },
+  { id: 'presentation', name: 'Freesentation', fontFamily: sans('Presentation') },
+  { id: 'nanumneo', name: '나눔스퀘어 네오', fontFamily: sans('NanumSquareNeo') },
+  { id: 'nanumround', name: '나눔스퀘어 라운드', fontFamily: sans('NanumSquareRound') },
+  { id: 'a2z', name: '에이투지체', fontFamily: sans('A2z') },
+  { id: 'nexon', name: '넥슨 Lv.2 고딕', fontFamily: sans('NexonLv2Gothic') },
+  { id: 'paperozi', name: '페이퍼로지', fontFamily: sans('Paperozi') },
+  { id: 'onestore', name: '원스토어 모바일고딕 제목', fontFamily: sans('OneStoreMobileGothicTitleFont') },
+  { id: 'wave', name: '웨이브 파도체', fontFamily: sans('Wave') },
+  { id: 'alice', name: '앨리스 디지털배움체', fontFamily: sans('AliceDigitalLearning') },
+  { id: 'tmoney', name: '티머니 둥근바람', fontFamily: sans('TMoneyDungunbaram') },
+  { id: 'schoolsafe', name: '학교안심 우주체', fontFamily: sans('SchoolSafeUniverse') },
+  { id: 'ridibatang', name: '리디바탕', fontFamily: serif('Ridibatang') },
+  { id: 'gounbatang', name: '고운바탕', fontFamily: serif('GounBatang') },
+  { id: 'maruburi', name: '마루부리', fontFamily: serif('MaruBuri') },
+  { id: 'nanummyeongjo', name: '나눔명조', fontFamily: serif('Nanum Myeongjo') },
+  { id: 'chosun', name: '조선일보명조', fontFamily: serif('ChosunIlboMyungjo') },
+  { id: 'nanumpen', name: '나눔바른펜', fontFamily: sans('NanumBarunPen') },
+  { id: 'diary', name: '다이어리체', fontFamily: sans('Diary') },
+  { id: 'isyun', name: '이서윤체', fontFamily: sans('IsYun') },
+]
+
+function mergeFonts(saved?: FontOption[]): FontOption[] {
+  void saved
+  return builtinFonts
+}
+
+function resolveFont(fonts: FontOption[], id?: string): FontOption {
+  return fonts.find((font) => font.id === id) ?? fonts[0] ?? pretendardFont
+}
+
+export const builtinThemes: ThemeDefinition[] = [
+  {
+    id: 'light',
+    name: '라이트',
+    builtin: true,
+    palette: {
+      bg: '#f7f6f3',
+      surface: '#ffffff',
+      surfaceSoft: '#f2f1ed',
+      surfaceMuted: '#e9e7e1',
+      ink: '#33322f',
+      inkSoft: '#63615c',
+      inkMuted: '#96938c',
+      line: '#e8e5df',
+      lineStrong: '#d7d3cb',
+      accent: '#a8867a',
+      accentSoft: '#efe6e1',
+      onAccent: '#ffffff',
+    },
+  },
+  {
+    id: 'mono',
+    name: '모노',
+    builtin: true,
+    palette: {
+      bg: '#f4f4f4',
+      surface: '#ffffff',
+      surfaceSoft: '#efefef',
+      surfaceMuted: '#e4e4e4',
+      ink: '#1c1c1c',
+      inkSoft: '#565656',
+      inkMuted: '#8c8c8c',
+      line: '#e2e2e2',
+      lineStrong: '#c9c9c9',
+      accent: '#3a3a3a',
+      accentSoft: '#e6e6e6',
+      onAccent: '#ffffff',
+    },
+  },
+  {
+    id: 'dark',
+    name: '다크',
+    builtin: true,
+    palette: {
+      bg: '#16171b',
+      surface: '#202228',
+      surfaceSoft: '#1a1c21',
+      surfaceMuted: '#2b2e35',
+      ink: '#e8e7e3',
+      inkSoft: '#aeaca6',
+      inkMuted: '#77756f',
+      line: '#2e3138',
+      lineStrong: '#3e424b',
+      accent: '#b3a0cc',
+      accentSoft: '#2c2836',
+      onAccent: '#1a1621',
+    },
+  },
+  {
+    id: 'sepia',
+    name: '세피아',
+    builtin: true,
+    palette: {
+      bg: '#e6ded2',
+      surface: '#f5f0e8',
+      surfaceSoft: '#ddd5c9',
+      surfaceMuted: '#d0c5b6',
+      ink: '#3f3a32',
+      inkSoft: '#625b50',
+      inkMuted: '#8e8476',
+      line: '#d6cdbf',
+      lineStrong: '#b9ad9b',
+      accent: '#887263',
+      accentSoft: '#dbcec2',
+      onAccent: '#fffaf2',
+    },
+  },
+  {
+    id: 'green',
+    name: '그린',
+    builtin: true,
+    palette: {
+      bg: '#edeae3',
+      surface: '#f6f3ee',
+      surfaceSoft: '#e6e2da',
+      surfaceMuted: '#dbd5cb',
+      ink: '#3d3830',
+      inkSoft: '#635d52',
+      inkMuted: '#918a7d',
+      line: '#ddd8ce',
+      lineStrong: '#c9c2b4',
+      accent: '#8a9670',
+      accentSoft: '#e2e0d2',
+      onAccent: '#ffffff',
+    },
+  },
+  {
+    id: 'pink',
+    name: '핑크',
+    builtin: true,
+    palette: {
+      bg: '#f5ece8',
+      surface: '#fcf5f2',
+      surfaceSoft: '#f2e6e0',
+      surfaceMuted: '#ead9d2',
+      ink: '#4a3b37',
+      inkSoft: '#6f5c56',
+      inkMuted: '#a68f88',
+      line: '#edddd6',
+      lineStrong: '#dfc6bb',
+      accent: '#c48e83',
+      accentSoft: '#f4e1db',
+      onAccent: '#ffffff',
+    },
+  },
+  {
+    id: 'blue',
+    name: '블루',
+    builtin: true,
+    palette: {
+      bg: '#e7edf3',
+      surface: '#f3f7fb',
+      surfaceSoft: '#e1eaf2',
+      surfaceMuted: '#d0ddea',
+      ink: '#303c47',
+      inkSoft: '#566472',
+      inkMuted: '#879aa8',
+      line: '#d7e2ec',
+      lineStrong: '#bbccdb',
+      accent: '#7d9db8',
+      accentSoft: '#dde7f0',
+      onAccent: '#ffffff',
+    },
+  },
+  {
+    id: 'purple',
+    name: '퍼플',
+    builtin: true,
+    palette: {
+      bg: '#ebe8f3',
+      surface: '#f5f2fb',
+      surfaceSoft: '#e7e1f2',
+      surfaceMuted: '#d8d0e9',
+      ink: '#3b3546',
+      inkSoft: '#5f586e',
+      inkMuted: '#938ca4',
+      line: '#e0d8ee',
+      lineStrong: '#c8bbe0',
+      accent: '#9384bf',
+      accentSoft: '#e6def4',
+      onAccent: '#ffffff',
+    },
+  },
+]
+
+export const defaultPalette = builtinThemes[0].palette
+
+export function resolvePalette(settings: ViewerSettings): ThemePalette {
+  if (settings.themeId === 'custom') return settings.customPalette
+  const found =
+    builtinThemes.find((theme) => theme.id === settings.themeId) ??
+    settings.customThemes.find((theme) => theme.id === settings.themeId)
+  return found?.palette ?? defaultPalette
+}
+
+export const defaultHighlightColors = ['#FCE29A', '#F6B8C4', '#B4E1C6', '#AFC7E8']
+
+export const defaultSettings: ViewerSettings = {
+  fontId: pretendardFont.id,
+  fontFamily: pretendardFont.fontFamily,
+  fontWeight: 400,
+  uiFontId: pretendardFont.id,
+  uiFontFamily: pretendardFont.fontFamily,
+  uiFontScale: 1,
+  uiFontWeight: 400,
+  fonts: builtinFonts,
+  fontSize: 16,
+  lineHeight: 1.75,
+  paragraphSpacing: 14,
+  messageWidth: 720,
+  languageMode: 'both',
+  includeHidden: true,
+  readMode: 'scroll',
+  scrollWindowSize: 10,
+  themeId: 'light',
+  customPalette: defaultPalette,
+  customThemes: [],
+  showCoverImage: true,
+  coverHeight: 200,
+  coverPosition: 50,
+  coverImageMode: 'original',
+  tagModes: {},
+  highlightColors: defaultHighlightColors,
+  defaultHighlightColor: defaultHighlightColors[0],
+  keyboardShortcutsEnabled: true,
+  showProgressBar: true,
+  showAvatars: true,
+  notesEnabled: true,
+  highlightEnabled: true,
+  showMessageMeta: true,
+  hideAiThinking: false,
+  autoHideTopbar: false,
+  homeTitle: '나의 서랍',
+  homeBannerCoverHeight: 220,
+  homeBannerCoverPosition: 50,
+  homeCardCoverHeight: 150,
+}
+
+export function normalizeCoverPosition(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 50
+  return Math.min(Math.max(Math.round(value), 0), 100)
+}
+
+export function normalizeHomeBannerCoverHeight(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return defaultSettings.homeBannerCoverHeight
+  }
+  return Math.min(Math.max(Math.round(value), 120), 420)
+}
+
+export function normalizeHomeCardCoverHeight(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return defaultSettings.homeCardCoverHeight
+  }
+  return Math.min(Math.max(Math.round(value), 110), 260)
+}
+
+export const settingsKey = 'st-chat-viewer:settings'
+
+export function loadSettings(): ViewerSettings {
+  try {
+    const raw = localStorage.getItem(settingsKey)
+    if (!raw) return defaultSettings
+    const parsed = JSON.parse(raw) as Partial<ViewerSettings>
+    const fonts = mergeFonts(parsed.fonts)
+    const readingFont = resolveFont(fonts, parsed.fontId)
+    const uiFont = resolveFont(fonts, parsed.uiFontId)
+    return {
+      ...defaultSettings,
+      ...parsed,
+      fonts,
+      fontId: readingFont.id,
+      fontFamily: readingFont.fontFamily,
+      uiFontId: uiFont.id,
+      uiFontFamily: uiFont.fontFamily,
+      themeId: parsed.themeId ?? defaultSettings.themeId,
+      languageMode:
+        parsed.languageMode === 'translated'
+          ? defaultSettings.languageMode
+          : parsed.languageMode ?? defaultSettings.languageMode,
+      customPalette: {
+        ...defaultPalette,
+        ...parsed.customPalette,
+      },
+      customThemes: parsed.customThemes ?? [],
+      highlightColors: parsed.highlightColors?.length
+        ? parsed.highlightColors
+        : defaultHighlightColors,
+      defaultHighlightColor:
+        parsed.defaultHighlightColor ?? defaultSettings.defaultHighlightColor,
+      keyboardShortcutsEnabled:
+        parsed.keyboardShortcutsEnabled ?? defaultSettings.keyboardShortcutsEnabled,
+      fontWeight: parsed.fontWeight ?? defaultSettings.fontWeight,
+      uiFontScale: parsed.uiFontScale ?? defaultSettings.uiFontScale,
+      uiFontWeight: parsed.uiFontWeight ?? defaultSettings.uiFontWeight,
+      notesEnabled: parsed.notesEnabled ?? defaultSettings.notesEnabled,
+      highlightEnabled: parsed.highlightEnabled ?? defaultSettings.highlightEnabled,
+      showMessageMeta: parsed.showMessageMeta ?? defaultSettings.showMessageMeta,
+      hideAiThinking: parsed.hideAiThinking ?? defaultSettings.hideAiThinking,
+      autoHideTopbar: parsed.autoHideTopbar ?? defaultSettings.autoHideTopbar,
+      homeTitle:
+        parsed.homeTitle && parsed.homeTitle !== '챗서랍'
+          ? parsed.homeTitle
+          : defaultSettings.homeTitle,
+      coverPosition: normalizeCoverPosition(parsed.coverPosition),
+      homeBannerCoverHeight: normalizeHomeBannerCoverHeight(
+        parsed.homeBannerCoverHeight,
+      ),
+      homeBannerCoverPosition: normalizeCoverPosition(
+        parsed.homeBannerCoverPosition,
+      ),
+      homeCardCoverHeight: normalizeHomeCardCoverHeight(
+        parsed.homeCardCoverHeight,
+      ),
+    }
+  } catch {
+    return defaultSettings
+  }
+}
+
+export function saveSettings(settings: ViewerSettings) {
+  localStorage.setItem(settingsKey, JSON.stringify(settings))
+}
+
+export const readingKey = 'st-chat-viewer:reading'
+
+export function loadReadingPositions(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(readingKey)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, number>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveReadingPositions(positions: Record<string, number>) {
+  localStorage.setItem(readingKey, JSON.stringify(positions))
+}
