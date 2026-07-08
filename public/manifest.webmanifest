@@ -1,0 +1,24 @@
+{
+  "name": "챗서랍",
+  "short_name": "챗서랍",
+  "description": "SillyTavern 채팅을 개인 서재처럼 보관하고 읽는 로컬 독서 앱",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f3",
+  "theme_color": "#f7f6f3",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
