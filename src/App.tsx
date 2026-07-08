@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import './App.css'
 import {
   builtinFonts,
@@ -1996,6 +1997,7 @@ function App() {
         <HighlightModal
           chat={selectedChat}
           highlights={highlights}
+          defaultHighlightColor={settings.defaultHighlightColor}
           onClose={() => setHighlightModalOpen(false)}
           onDelete={(highlightId) => void removeHighlight(highlightId)}
           onGoOriginal={(highlight) => {
@@ -2467,16 +2469,43 @@ function NoteEditor({
 function HighlightModal({
   chat,
   highlights,
+  defaultHighlightColor,
   onClose,
   onDelete,
   onGoOriginal,
 }: {
   chat: ViewerChat
   highlights: MessageHighlight[]
+  defaultHighlightColor: string
   onClose: () => void
   onDelete: (highlightId: string) => void
   onGoOriginal: (highlight: MessageHighlight) => void
 }) {
+  const [activeColor, setActiveColor] = useState<string>('all')
+  const colorGroups = useMemo(() => {
+    const groups = new Map<string, MessageHighlight[]>()
+    for (const highlight of highlights) {
+      const color = highlight.color ?? defaultHighlightColor
+      groups.set(color, [...(groups.get(color) ?? []), highlight])
+    }
+    return [...groups.entries()].map(([color, items]) => ({ color, items }))
+  }, [defaultHighlightColor, highlights])
+  const visibleHighlights =
+    activeColor === 'all'
+      ? highlights
+      : highlights.filter(
+          (highlight) => (highlight.color ?? defaultHighlightColor) === activeColor,
+        )
+
+  useEffect(() => {
+    if (
+      activeColor !== 'all' &&
+      !colorGroups.some((group) => group.color === activeColor)
+    ) {
+      setActiveColor('all')
+    }
+  }, [activeColor, colorGroups])
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="settings-modal highlight-modal" role="dialog" aria-modal="true">
@@ -2491,36 +2520,66 @@ function HighlightModal({
         </header>
 
         {highlights.length ? (
-          <div className="highlight-modal-list">
-            {highlights.map((highlight) => {
-              const message = chat.messages.find(
-                (item) => item.id === highlight.messageId,
-              )
-              return (
-                <article className="highlight-card" key={highlight.id}>
-                  <div>
-                    <span className="eyebrow">
-                      #{highlight.messageIndex}
-                      {message?.name ? ` · ${message.name}` : ''}
-                    </span>
-                    <p>{highlight.text}</p>
-                  </div>
-                  <div className="highlight-card-actions">
-                    <button type="button" onClick={() => onGoOriginal(highlight)}>
-                      원문으로
-                    </button>
-                    <button
-                      type="button"
-                      title="하이라이트 삭제"
-                      onClick={() => onDelete(highlight.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+          <>
+            <div className="highlight-filter-bar" aria-label="하이라이트 색상 필터">
+              <button
+                type="button"
+                className={activeColor === 'all' ? 'active' : ''}
+                onClick={() => setActiveColor('all')}
+              >
+                전체 {highlights.length}
+              </button>
+              {colorGroups.map((group) => (
+                <button
+                  type="button"
+                  key={group.color}
+                  className={activeColor === group.color ? 'active' : ''}
+                  style={{
+                    '--filter-color': group.color,
+                  } as CSSProperties}
+                  onClick={() => setActiveColor(group.color)}
+                >
+                  <span aria-hidden="true" />
+                  {group.items.length}
+                </button>
+              ))}
+            </div>
+            <div className="highlight-modal-list">
+              {visibleHighlights.map((highlight) => {
+                const message = chat.messages.find(
+                  (item) => item.id === highlight.messageId,
+                )
+                const color = highlight.color ?? defaultHighlightColor
+                return (
+                  <article
+                    className="highlight-card"
+                    key={highlight.id}
+                    style={{ '--highlight-card-color': color } as CSSProperties}
+                  >
+                    <div>
+                      <span className="eyebrow">
+                        #{highlight.messageIndex}
+                        {message?.name ? ` · ${message.name}` : ''}
+                      </span>
+                      <p>{highlight.text}</p>
+                    </div>
+                    <div className="highlight-card-actions">
+                      <button type="button" onClick={() => onGoOriginal(highlight)}>
+                        원문으로
+                      </button>
+                      <button
+                        type="button"
+                        title="하이라이트 삭제"
+                        onClick={() => onDelete(highlight.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </>
         ) : (
           <div className="empty-modal-state">
             <Palette size={34} />
@@ -3128,7 +3187,10 @@ function SettingsModal({
                   onUpdate({ keyboardShortcutsEnabled: event.currentTarget.checked })
                 }
               />
-              키보드 단축키 사용
+              <span className="check-copy">
+                키보드 단축키 사용
+                <span className="shortcut-hint">/ 검색, ← 이전, → 다음</span>
+              </span>
             </label>
             <label className="check-row">
               <input

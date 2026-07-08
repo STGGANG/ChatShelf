@@ -8,10 +8,12 @@ import type {
 export const pretendardFont: FontOption = {
   id: 'pretendard',
   name: 'Pretendard',
-  fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontFamily:
+    'Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif',
 }
 
-const sans = (fam: string) => `"${fam}", Pretendard, sans-serif`
+const sans = (fam: string) =>
+  `"${fam}", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`
 const serif = (fam: string) => `"${fam}", "Nanum Myeongjo", serif`
 
 export const builtinFonts: FontOption[] = [

@@ -1471,6 +1471,18 @@ input[type='checkbox']:focus-visible {
 .asset-share-check span {
   min-width: 0;
 }
+.check-copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.55rem;
+  min-width: 0;
+}
+.shortcut-hint {
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
 .file-detail summary {
   cursor: pointer;
   font-size: 0.78rem;
@@ -1890,6 +1902,48 @@ input[type='checkbox']:focus-visible {
 .highlight-modal {
   width: min(680px, 100%);
 }
+.highlight-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+.highlight-filter-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 34px;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
+}
+.highlight-filter-bar button:hover,
+.highlight-filter-bar button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.highlight-filter-bar button span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--filter-color);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 14%);
+}
+.highlight-filter-bar button.active span {
+  box-shadow:
+    inset 0 0 0 1px rgb(0 0 0 / 14%),
+    0 0 0 2px var(--surface),
+    0 0 0 3px var(--filter-color);
+}
 .highlight-modal-list {
   display: flex;
   flex-direction: column;
@@ -1906,6 +1960,7 @@ input[type='checkbox']:focus-visible {
   border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--surface-soft);
+  border-left: 5px solid var(--highlight-card-color, var(--accent));
 }
 .highlight-card p {
   margin: 0.25rem 0 0;
