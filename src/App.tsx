@@ -3147,7 +3147,12 @@ function SettingsModal({
                   onUpdate({ showMessageMeta: event.currentTarget.checked })
                 }
               />
-              메시지 부가정보 표시
+              <span className="check-copy">
+                메시지 부가정보 표시
+                <span className="shortcut-hint">
+                  타임스탬프, 모델, 토큰 수, 현재 스와이프 번호
+                </span>
+              </span>
             </label>
             <label className="check-row">
               <input
