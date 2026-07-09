@@ -2923,7 +2923,7 @@ function SettingsModal({
               />
             </label>
             <label className="settings-span">
-              홈배너 커버 위치(%) {settings.homeBannerCoverPosition}%
+              홈 배너 커버 위치(%) {settings.homeBannerCoverPosition}%
               <input
                 type="range"
                 min={0}
@@ -2937,7 +2937,7 @@ function SettingsModal({
               />
             </label>
             <label className="settings-span">
-              카드 커버 이미지 높이 {settings.homeCardCoverHeight}px
+              채팅방 커버 이미지 높이 {settings.homeCardCoverHeight}px
               <input
                 type="range"
                 min={110}
@@ -2958,6 +2958,7 @@ function SettingsModal({
               <Type size={16} />
               UI 글꼴
             </h2>
+            <p className="setting-note">일부 폰트는 굵기 적용이 안될 수 있습니다.</p>
             <label>
               UI 글꼴
               <select

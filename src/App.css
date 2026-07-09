@@ -1483,6 +1483,13 @@ input[type='checkbox']:focus-visible {
   font-size: 0.72rem;
   font-weight: 500;
 }
+.setting-note {
+  margin: -0.2rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
 .file-detail summary {
   cursor: pointer;
   font-size: 0.78rem;
