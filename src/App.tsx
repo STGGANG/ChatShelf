@@ -2000,8 +2000,7 @@ function App() {
           defaultHighlightColor={settings.defaultHighlightColor}
           onClose={() => setHighlightModalOpen(false)}
           onDelete={(highlightId) => void removeHighlight(highlightId)}
-          onGoOriginal={(highlight) => {
-            updateSettings({ languageMode: 'original' })
+          onGoMessage={(highlight) => {
             jumpToIndex(highlight.messageIndex)
             setHighlightModalOpen(false)
           }}
@@ -2472,14 +2471,14 @@ function HighlightModal({
   defaultHighlightColor,
   onClose,
   onDelete,
-  onGoOriginal,
+  onGoMessage,
 }: {
   chat: ViewerChat
   highlights: MessageHighlight[]
   defaultHighlightColor: string
   onClose: () => void
   onDelete: (highlightId: string) => void
-  onGoOriginal: (highlight: MessageHighlight) => void
+  onGoMessage: (highlight: MessageHighlight) => void
 }) {
   const [activeColor, setActiveColor] = useState<string>('all')
   const colorGroups = useMemo(() => {
@@ -2564,8 +2563,8 @@ function HighlightModal({
                       <p>{highlight.text}</p>
                     </div>
                     <div className="highlight-card-actions">
-                      <button type="button" onClick={() => onGoOriginal(highlight)}>
-                        원문으로
+                      <button type="button" onClick={() => onGoMessage(highlight)}>
+                        메시지로
                       </button>
                       <button
                         type="button"
