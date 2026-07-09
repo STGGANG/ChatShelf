@@ -2795,8 +2795,6 @@ function SettingsModal({
   onResetSettings: () => void
   onResetAll: () => void
 }) {
-  const highlightColorInputRef = useRef<HTMLInputElement>(null)
-
   const selectFont = (id: string) => {
     const font = settings.fonts.find((item) => item.id === id)
     if (!font) return
@@ -3348,7 +3346,7 @@ function SettingsModal({
             <div className="settings-subhead">하이라이트 색상</div>
             <div className="highlight-color-editor">
               {settings.highlightColors.map((color, index) => (
-                <div key={`${color}-${index}`} className="highlight-color-item">
+                <div key={`highlight-color-${index}`} className="highlight-color-item">
                   <input
                     aria-label={`하이라이트 색상 ${index + 1}`}
                     type="color"
@@ -3378,24 +3376,21 @@ function SettingsModal({
                   )}
                 </div>
               ))}
-              <button
-                type="button"
+              <label
                 className="highlight-color-add"
                 title="하이라이트 색상 추가"
-                onClick={() => highlightColorInputRef.current?.click()}
               >
                 <Plus size={18} />
-              </button>
-              <input
-                ref={highlightColorInputRef}
-                className="visually-hidden"
-                type="color"
-                value={
-                  settings.highlightColors[settings.highlightColors.length - 1] ??
-                  defaultHighlightColors[0]
-                }
-                onChange={(event) => addHighlightColor(event.currentTarget.value)}
-              />
+                <input
+                  aria-label="하이라이트 색상 추가"
+                  type="color"
+                  value={
+                    settings.highlightColors[settings.highlightColors.length - 1] ??
+                    defaultHighlightColors[0]
+                  }
+                  onChange={(event) => addHighlightColor(event.currentTarget.value)}
+                />
+              </label>
             </div>
             <div className="stacked-buttons">
               <button

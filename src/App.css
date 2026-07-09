@@ -1865,6 +1865,7 @@ input[type='checkbox']:focus-visible {
   border-color: #e0b4ad;
 }
 .highlight-color-add {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1874,7 +1875,17 @@ input[type='checkbox']:focus-visible {
   border: 1.5px dashed var(--line-strong);
   background: var(--surface);
   color: var(--ink-muted);
+  cursor: pointer;
+  overflow: hidden;
   transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.highlight-color-add input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 .highlight-color-add:hover {
   background: var(--accent-soft);
