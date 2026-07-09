@@ -84,6 +84,7 @@ import type {
   ViewerChat,
   ViewerMessage,
   ViewerSettings,
+  WordMaskRule,
 } from './types'
 
 const backupVersion = 1
@@ -114,6 +115,14 @@ function normalizeCharacterName(value?: string) {
   return value?.trim().toLocaleLowerCase() ?? ''
 }
 
+function normalizeWordMaskRules(rules?: WordMaskRule[]) {
+  return (rules ?? []).map((rule) => ({
+    id: rule.id || makeId('mask'),
+    source: rule.source ?? '',
+    replacement: rule.replacement ?? '',
+  }))
+}
+
 function normalizeChat(chat: ViewerChat): ViewerChat {
   return {
     ...chat,
@@ -121,10 +130,43 @@ function normalizeChat(chat: ViewerChat): ViewerChat {
     assets: chat.assets ?? [],
     notes: chat.notes ?? [],
     highlights: chat.highlights ?? [],
+    wordMaskEnabled: chat.wordMaskEnabled ?? false,
+    wordMaskApplyToCopy: chat.wordMaskApplyToCopy ?? false,
+    wordMaskRules: normalizeWordMaskRules(chat.wordMaskRules),
     messages: chat.messages.map((message) => ({
       ...message,
       swipes: message.swipes ?? [],
     })),
+  }
+}
+
+function activeWordMaskRules(chat?: ViewerChat, options?: { forCopy?: boolean }) {
+  if (!chat?.wordMaskEnabled) return []
+  if (options?.forCopy && !chat.wordMaskApplyToCopy) return []
+  return chat.wordMaskRules.filter((rule) => rule.source.length > 0)
+}
+
+function applyWordMasksToText(text: string, rules: WordMaskRule[]) {
+  if (!text || !rules.length) return text
+  return rules.reduce(
+    (masked, rule) => masked.split(rule.source).join(rule.replacement),
+    text,
+  )
+}
+
+function applyWordMasksToElement(root: HTMLElement, rules: WordMaskRule[]) {
+  if (!rules.length) return
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let node = walker.nextNode()
+
+  while (node) {
+    textNodes.push(node as Text)
+    node = walker.nextNode()
+  }
+
+  for (const textNode of textNodes) {
+    textNode.nodeValue = applyWordMasksToText(textNode.nodeValue ?? '', rules)
   }
 }
 
@@ -1864,6 +1906,11 @@ function App() {
           )}
         </section>
 
+        <WordMaskPanel
+          chat={selectedChat}
+          onUpdate={updateSelectedChatFields}
+        />
+
         <section className="panel">
           <h2>
             <StepForward size={16} />
@@ -2177,6 +2224,10 @@ function MessageCard({
               if (settings.languageMode === 'original') text = original
               else if (settings.languageMode === 'both' && translated)
                 text = `${translated}\n\n${original}`
+              text = applyWordMasksToText(
+                text,
+                activeWordMaskRules(chat, { forCopy: true }),
+              )
               onCopy(text)
             }}
           >
@@ -2271,6 +2322,7 @@ function MessageBodies({
   highlights: MessageHighlight[]
 }) {
   const hasTranslated = Boolean(message.rawTranslated)
+  const maskRules = activeWordMaskRules(chat)
 
   if (settings.languageMode === 'both' && hasTranslated) {
     return (
@@ -2281,6 +2333,7 @@ function MessageBodies({
           assets={chat.assets}
           settings={settings}
           highlights={highlights}
+          maskRules={maskRules}
           tone="translated"
         />
         <TextBlock
@@ -2289,6 +2342,7 @@ function MessageBodies({
           assets={chat.assets}
           settings={settings}
           highlights={highlights}
+          maskRules={maskRules}
           tone="original"
         />
       </div>
@@ -2307,6 +2361,7 @@ function MessageBodies({
       assets={chat.assets}
       settings={settings}
       highlights={highlights}
+      maskRules={maskRules}
     />
   )
 }
@@ -2317,6 +2372,7 @@ function TextBlock({
   assets,
   settings,
   highlights,
+  maskRules,
   tone,
 }: {
   label: string
@@ -2324,6 +2380,7 @@ function TextBlock({
   assets: ChatAsset[]
   settings: ViewerSettings
   highlights: MessageHighlight[]
+  maskRules: WordMaskRule[]
   tone?: 'translated' | 'original'
 }) {
   const parts = useMemo(() => splitTaggedText(text), [text])
@@ -2345,6 +2402,7 @@ function TextBlock({
               assets={assets}
               settings={settings}
               highlights={highlights}
+              maskRules={maskRules}
             />
           ),
         )}
@@ -2358,11 +2416,13 @@ function MarkdownChunk({
   assets,
   settings,
   highlights,
+  maskRules,
 }: {
   text: string
   assets: ChatAsset[]
   settings: ViewerSettings
   highlights: MessageHighlight[]
+  maskRules: WordMaskRule[]
 }) {
   const html = useMemo(
     () => renderMarkdown(text, assets),
@@ -2373,6 +2433,10 @@ function MarkdownChunk({
     () => highlights.map((item) => `${item.id}:${item.color ?? ''}:${item.text}`).join('|'),
     [highlights],
   )
+  const maskSignature = useMemo(
+    () => maskRules.map((rule) => `${rule.id}:${rule.source}:${rule.replacement}`).join('|'),
+    [maskRules],
+  )
 
   useEffect(() => {
     const el = bodyRef.current
@@ -2381,8 +2445,11 @@ function MarkdownChunk({
     if (highlights.length) {
       applyHighlightsToElement(el, highlights, settings.defaultHighlightColor)
     }
+    if (maskRules.length) {
+      applyWordMasksToElement(el, maskRules)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [html, highlightSignature, settings.defaultHighlightColor])
+  }, [html, highlightSignature, maskSignature, settings.defaultHighlightColor])
 
   if (!text.trim()) return null
 
@@ -2772,6 +2839,157 @@ function FolderField({
         </div>
       )}
     </div>
+  )
+}
+
+function WordMaskPanel({
+  chat,
+  onUpdate,
+}: {
+  chat?: ViewerChat
+  onUpdate: (patch: Partial<ViewerChat>) => void
+}) {
+  const [source, setSource] = useState('')
+  const [replacement, setReplacement] = useState('')
+
+  useEffect(() => {
+    setSource('')
+    setReplacement('')
+  }, [chat?.id])
+
+  if (!chat) {
+    return (
+      <section className="panel">
+        <h2>
+          <Eye size={16} />
+          단어 마스킹
+        </h2>
+        <p className="muted">선택된 채팅이 없습니다.</p>
+      </section>
+    )
+  }
+
+  const rules = chat.wordMaskRules
+
+  const addRule = () => {
+    const nextSource = source.trim()
+    if (!nextSource) return
+    onUpdate({
+      wordMaskRules: [
+        ...rules,
+        {
+          id: makeId('mask'),
+          source: nextSource,
+          replacement,
+        },
+      ],
+    })
+    setSource('')
+    setReplacement('')
+  }
+
+  const updateRule = (id: string, patch: Partial<WordMaskRule>) => {
+    onUpdate({
+      wordMaskRules: rules.map((rule) =>
+        rule.id === id ? { ...rule, ...patch } : rule,
+      ),
+    })
+  }
+
+  const removeRule = (id: string) => {
+    onUpdate({
+      wordMaskRules: rules.filter((rule) => rule.id !== id),
+    })
+  }
+
+  return (
+    <section className="panel">
+      <h2>
+        <Eye size={16} />
+        단어 마스킹
+      </h2>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={chat.wordMaskEnabled}
+          onChange={(event) =>
+            onUpdate({ wordMaskEnabled: event.currentTarget.checked })
+          }
+        />
+        <span>이 채팅방에서 마스킹 사용</span>
+      </label>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={chat.wordMaskApplyToCopy}
+          disabled={!chat.wordMaskEnabled}
+          onChange={(event) =>
+            onUpdate({ wordMaskApplyToCopy: event.currentTarget.checked })
+          }
+        />
+        <span>복사할 때도 마스킹 적용</span>
+      </label>
+      <div className="mask-add-row">
+        <input
+          value={source}
+          placeholder="단어"
+          onChange={(event) => setSource(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') addRule()
+          }}
+        />
+        <input
+          value={replacement}
+          placeholder="대체 표시"
+          onChange={(event) => setReplacement(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') addRule()
+          }}
+        />
+        <button
+          type="button"
+          title="마스킹 단어 추가"
+          onClick={addRule}
+          disabled={!source.trim()}
+        >
+          <Plus size={15} />
+        </button>
+      </div>
+      {rules.length > 0 ? (
+        <div className="mask-rule-list">
+          {rules.map((rule) => (
+            <div className="mask-rule-row" key={rule.id}>
+              <input
+                value={rule.source}
+                aria-label="마스킹할 단어"
+                onChange={(event) =>
+                  updateRule(rule.id, { source: event.currentTarget.value })
+                }
+              />
+              <span aria-hidden="true">→</span>
+              <input
+                value={rule.replacement}
+                aria-label="대체 표시"
+                onChange={(event) =>
+                  updateRule(rule.id, {
+                    replacement: event.currentTarget.value,
+                  })
+                }
+              />
+              <button
+                type="button"
+                title="삭제"
+                onClick={() => removeRule(rule.id)}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">등록된 마스킹 단어가 없습니다.</p>
+      )}
+    </section>
   )
 }
 

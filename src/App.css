@@ -1471,6 +1471,55 @@ input[type='checkbox']:focus-visible {
 .asset-share-check span {
   min-width: 0;
 }
+.mask-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
+  gap: 0.4rem;
+  align-items: center;
+}
+.mask-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mask-rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 32px;
+  gap: 0.35rem;
+  align-items: center;
+}
+.mask-add-row input,
+.mask-rule-row input {
+  width: 100%;
+  min-width: 0;
+}
+.mask-rule-row span {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+.mask-add-row button,
+.mask-rule-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.mask-add-row button:hover,
+.mask-rule-row button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.mask-add-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 .check-copy {
   display: inline-flex;
   flex-wrap: wrap;

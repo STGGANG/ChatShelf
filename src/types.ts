@@ -121,6 +121,12 @@ export interface MessageHighlight {
   createdAt: string
 }
 
+export interface WordMaskRule {
+  id: string
+  source: string
+  replacement: string
+}
+
 export interface ViewerChat {
   id: string
   title: string
@@ -137,6 +143,9 @@ export interface ViewerChat {
   assets: ChatAsset[]
   notes: MessageNote[]
   highlights: MessageHighlight[]
+  wordMaskEnabled: boolean
+  wordMaskApplyToCopy: boolean
+  wordMaskRules: WordMaskRule[]
   sortOrder: number
   createdAt: string
   importedAt: string
