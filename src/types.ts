@@ -8,6 +8,10 @@ export type TagDisplayMode = 'collapsed' | 'expanded' | 'hidden'
 
 export type CoverImageMode = 'grayscale' | 'dark' | 'blur' | 'original'
 
+export type DriveImageMode = 'local' | 'drive'
+
+export type DriveAutoBackupInterval = 5 | 10 | 30 | 60
+
 export interface ThemePalette {
   bg: string
   surface: string
@@ -100,6 +104,8 @@ export interface ChatAsset {
   filename: string
   type: string
   dataUrl: string
+  storage?: DriveImageMode
+  driveFileId?: string
   addedAt: string
 }
 
@@ -193,10 +199,23 @@ export interface ViewerSettings {
   homeCardCoverHeight: number
 }
 
+export interface GoogleDriveState {
+  connected: boolean
+  autoBackupEnabled: boolean
+  autoBackupIntervalMinutes: DriveAutoBackupInterval
+  imageImportMode: DriveImageMode
+  lastBackupAt?: string
+  lastBackupFileId?: string
+  lastLocalRevisionAt?: string
+  lastBackupLocalRevisionAt?: string
+  pausedForRemoteBackupId?: string
+}
+
 export interface ViewerBackup {
   app: 'st-chat-viewer'
   version: 1
   exportedAt: string
+  localRevisionAt?: string
   chats: ViewerChat[]
   settings: ViewerSettings
   readingPositions?: Record<string, number>

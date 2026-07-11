@@ -1718,6 +1718,43 @@ input[type='checkbox']:focus-visible {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.settings-button-row button:disabled,
+.stacked-buttons button:disabled,
+.panel > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.settings-button-row button:disabled:hover,
+.stacked-buttons button:disabled:hover,
+.panel > button:disabled:hover {
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+.drive-panel a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+.drive-alert {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+}
+.drive-alert div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.drive-alert strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+.drive-alert span {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
 
 .dual-field {
   display: grid;

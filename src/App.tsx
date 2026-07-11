@@ -5,6 +5,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  Cloud,
   Copy,
   Download,
   Eye,
@@ -59,6 +60,18 @@ import {
   renderMarkdown,
   stripMarkdownForSnippet,
 } from './lib/markdown'
+import {
+  downloadDriveBackup,
+  downloadDriveFileAsDataUrl,
+  downloadDriveFileAsObjectUrl,
+  downloadDriveText,
+  forgetGoogleDriveToken,
+  listDriveBackups,
+  pickDriveFiles,
+  requestGoogleDriveToken,
+  uploadDriveBackup,
+  type DriveBackupFile,
+} from './lib/googleDrive'
 import { parseSillyTavernJsonl } from './lib/parser'
 import {
   clearAllChats,
@@ -74,6 +87,8 @@ import {
 import { collectTagNames, splitTaggedText } from './lib/tags'
 import type {
   ChatAsset,
+  DriveAutoBackupInterval,
+  GoogleDriveState,
   MessageHighlight,
   MessageNote,
   ParsedTag,
@@ -88,6 +103,14 @@ import type {
 } from './types'
 
 const backupVersion = 1
+const driveStateKey = 'st-chat-viewer:googleDrive'
+
+const defaultGoogleDriveState: GoogleDriveState = {
+  connected: false,
+  autoBackupEnabled: false,
+  autoBackupIntervalMinutes: 10,
+  imageImportMode: 'local',
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
@@ -95,6 +118,41 @@ function clamp(value: number, min: number, max: number) {
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
+}
+
+function loadGoogleDriveState(): GoogleDriveState {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(driveStateKey) ?? '{}') as
+      Partial<GoogleDriveState>
+    return {
+      ...defaultGoogleDriveState,
+      ...parsed,
+      autoBackupIntervalMinutes:
+        parsed.autoBackupIntervalMinutes === 5 ||
+        parsed.autoBackupIntervalMinutes === 10 ||
+        parsed.autoBackupIntervalMinutes === 30 ||
+        parsed.autoBackupIntervalMinutes === 60
+          ? parsed.autoBackupIntervalMinutes
+          : 10,
+      imageImportMode:
+        parsed.imageImportMode === 'drive' ? 'drive' : 'local',
+    }
+  } catch {
+    return defaultGoogleDriveState
+  }
+}
+
+function isValidBackup(backup: ViewerBackup) {
+  return backup.app === 'st-chat-viewer' && Array.isArray(backup.chats)
+}
+
+function newestDate(...values: Array<string | undefined>) {
+  const dates = values
+    .filter(Boolean)
+    .map((value) => new Date(value as string).getTime())
+    .filter((value) => Number.isFinite(value))
+  if (!dates.length) return undefined
+  return new Date(Math.max(...dates)).toISOString()
 }
 
 function formatDate(value?: string) {
@@ -216,6 +274,8 @@ function App() {
   const selectionScanTimerRef = useRef<number | null>(null)
   const searchFlashTimerRef = useRef<number | null>(null)
   const readingSaveTimerRef = useRef<number | null>(null)
+  const driveBackupTimerRef = useRef<number | null>(null)
+  const driveAssetObjectUrlsRef = useRef<Record<string, string>>({})
   const openedChatRef = useRef<string>(undefined)
   const prependAnchorRef = useRef<number | null>(null)
   const [chats, setChats] = useState<ViewerChat[]>([])
@@ -260,11 +320,27 @@ function App() {
     x: number
     y: number
   } | null>(null)
+  const [driveState, setDriveState] = useState<GoogleDriveState>(() =>
+    loadGoogleDriveState(),
+  )
+  const [driveBusy, setDriveBusy] = useState(false)
+  const [remoteBackup, setRemoteBackup] = useState<DriveBackupFile | null>(null)
+  const [driveAssetUrls, setDriveAssetUrls] = useState<Record<string, string>>({})
 
   useEffect(() => {
     getChats().then((items) => {
       const ordered = sameChatOrder(items.map(normalizeChat))
       setChats(ordered)
+      const localRevisionAt = newestDate(
+        ...ordered.map((chat) => chat.updatedAt ?? chat.importedAt),
+      )
+      if (localRevisionAt) {
+        setDriveState((current) =>
+          current.lastLocalRevisionAt
+            ? current
+            : { ...current, lastLocalRevisionAt: localRevisionAt },
+        )
+      }
       const lastId = localStorage.getItem('st-chat-viewer:lastChat') ?? undefined
       const restored = ordered.find((chat) => chat.id === lastId)?.id
       setSelectedId((current) => current ?? restored ?? ordered[0]?.id)
@@ -301,23 +377,67 @@ function App() {
   }, [readingPositions])
 
   useEffect(() => {
+    localStorage.setItem(driveStateKey, JSON.stringify(driveState))
+  }, [driveState])
+
+  useEffect(() => {
+    if (driveBackupTimerRef.current) {
+      window.clearTimeout(driveBackupTimerRef.current)
+      driveBackupTimerRef.current = null
+    }
+    if (!driveState.connected || !driveState.autoBackupEnabled) return
+    if (driveState.pausedForRemoteBackupId || remoteBackup) return
+    if (!driveState.lastLocalRevisionAt) return
+    if (driveState.lastBackupLocalRevisionAt === driveState.lastLocalRevisionAt) return
+
+    driveBackupTimerRef.current = window.setTimeout(() => {
+      void saveDriveBackup('auto')
+    }, driveState.autoBackupIntervalMinutes * 60 * 1000)
+
+    return () => {
+      if (driveBackupTimerRef.current) {
+        window.clearTimeout(driveBackupTimerRef.current)
+        driveBackupTimerRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    driveState.connected,
+    driveState.autoBackupEnabled,
+    driveState.autoBackupIntervalMinutes,
+    driveState.lastLocalRevisionAt,
+    driveState.lastBackupLocalRevisionAt,
+    driveState.pausedForRemoteBackupId,
+    remoteBackup,
+  ])
+
+  useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(''), 3200)
     return () => window.clearTimeout(timer)
   }, [notice])
 
   const buildBackup = useCallback(
-    (): ViewerBackup => ({
+    (localRevisionAt?: string): ViewerBackup => ({
       app: 'st-chat-viewer',
       version: backupVersion,
       exportedAt: new Date().toISOString(),
+      localRevisionAt:
+        localRevisionAt ?? driveState.lastLocalRevisionAt ?? new Date().toISOString(),
       chats,
       settings,
       readingPositions,
       homeBanner,
       homeLogo,
     }),
-    [chats, settings, readingPositions, homeBanner, homeLogo],
+    [
+      chats,
+      settings,
+      readingPositions,
+      homeBanner,
+      homeLogo,
+      driveState.lastLocalRevisionAt,
+    ],
   )
 
   useEffect(
@@ -328,6 +448,12 @@ function App() {
       if (selectionScanTimerRef.current) {
         window.clearTimeout(selectionScanTimerRef.current)
       }
+      if (driveBackupTimerRef.current) {
+        window.clearTimeout(driveBackupTimerRef.current)
+      }
+      Object.values(driveAssetObjectUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      )
     },
     [],
   )
@@ -362,6 +488,17 @@ function App() {
     () => chats.find((chat) => chat.id === selectedId),
     [chats, selectedId],
   )
+  const displaySelectedChat = useMemo(() => {
+    if (!selectedChat) return undefined
+    return {
+      ...selectedChat,
+      assets: selectedChat.assets.map((asset) =>
+        asset.storage === 'drive'
+          ? { ...asset, dataUrl: driveAssetUrls[asset.id] ?? '' }
+          : asset,
+      ),
+    }
+  }, [driveAssetUrls, selectedChat])
   const selectedCharacterKey = normalizeCharacterName(selectedChat?.characterName)
   const sameCharacterChatCount = useMemo(
     () =>
@@ -397,6 +534,45 @@ function App() {
       ? messages
       : messages.filter((message) => !message.hiddenByST)
   }, [selectedChat, settings.includeHidden])
+
+  useEffect(() => {
+    if (!selectedChat || !driveState.connected) return
+    const driveAssets = selectedChat.assets.filter(
+      (asset) =>
+        asset.storage === 'drive' &&
+        asset.driveFileId &&
+        !driveAssetObjectUrlsRef.current[asset.id],
+    )
+    if (!driveAssets.length) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        await requestGoogleDriveToken()
+        const entries = await Promise.all(
+          driveAssets.map(async (asset) => [
+            asset.id,
+            await downloadDriveFileAsObjectUrl(asset.driveFileId as string),
+          ] as const),
+        )
+        if (cancelled) {
+          entries.forEach(([, url]) => URL.revokeObjectURL(url))
+          return
+        }
+        driveAssetObjectUrlsRef.current = {
+          ...driveAssetObjectUrlsRef.current,
+          ...Object.fromEntries(entries),
+        }
+        setDriveAssetUrls({ ...driveAssetObjectUrlsRef.current })
+      } catch {
+        setNotice('Drive 이미지를 불러오지 못했습니다. Google Drive 연결을 확인해 주세요.')
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [driveState.connected, selectedChat])
 
   const searchResults = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
@@ -521,11 +697,22 @@ function App() {
     }
   }, [selectedCharacterKey, shareAssetsByCharacter])
 
+  const markImportantChange = useCallback(() => {
+    const now = new Date().toISOString()
+    setDriveState((current) => ({
+      ...current,
+      lastLocalRevisionAt: now,
+    }))
+    return now
+  }, [])
+
   const updateSettings = (patch: Partial<ViewerSettings>) => {
+    markImportantChange()
     setSettings((current) => normalizedSettings({ ...current, ...patch }))
   }
 
   const updateChat = async (chat: ViewerChat) => {
+    markImportantChange()
     const updated = normalizeChat({ ...chat, updatedAt: new Date().toISOString() })
     setChats((current) =>
       sameChatOrder(
@@ -562,6 +749,7 @@ function App() {
     }
 
     if (imported.length) {
+      markImportantChange()
       const nextChats = sameChatOrder([...chats, ...imported])
       setChats(nextChats)
       setSelectedId(imported[imported.length - 1].id)
@@ -763,6 +951,7 @@ function App() {
       ...chat,
       sortOrder: index + 1,
     }))
+    markImportantChange()
     setDraggedChatId(undefined)
     setChats(next)
     await saveChats(next)
@@ -773,6 +962,7 @@ function App() {
     const ok = window.confirm(`"${selectedChat.title}" 채팅을 보관함에서 삭제할까요?`)
     if (!ok) return
     await deleteChat(selectedChat.id)
+    markImportantChange()
     const next = chats.filter((chat) => chat.id !== selectedChat.id)
     setChats(next)
     setSelectedId(next[0]?.id)
@@ -810,6 +1000,7 @@ function App() {
   const importHomeBanner = async (files: FileList | null) => {
     if (!files?.[0]) return
     const dataUrl = await readFileAsDataUrl(files[0])
+    markImportantChange()
     setHomeBanner(dataUrl)
     await setMeta('homeBanner', dataUrl)
     if (bannerInputRef.current) bannerInputRef.current.value = ''
@@ -817,6 +1008,7 @@ function App() {
   }
 
   const removeHomeBanner = async () => {
+    markImportantChange()
     setHomeBanner(undefined)
     await deleteMeta('homeBanner')
   }
@@ -824,6 +1016,7 @@ function App() {
   const importHomeLogo = async (files: FileList | null) => {
     if (!files?.[0]) return
     const dataUrl = await readFileAsDataUrl(files[0])
+    markImportantChange()
     setHomeLogo(dataUrl)
     await setMeta('homeLogo', dataUrl)
     if (logoInputRef.current) logoInputRef.current.value = ''
@@ -831,6 +1024,7 @@ function App() {
   }
 
   const removeHomeLogo = async () => {
+    markImportantChange()
     setHomeLogo(undefined)
     await deleteMeta('homeLogo')
   }
@@ -1024,30 +1218,52 @@ function App() {
     setNotice('백업 파일을 저장했습니다.')
   }
 
+  const applyBackup = async (
+    backup: ViewerBackup,
+    options?: { driveFile?: DriveBackupFile; markLocalChange?: boolean },
+  ) => {
+    if (!isValidBackup(backup)) {
+      throw new Error('챗서랍 백업 파일이 아닙니다.')
+    }
+    const restoredChats = sameChatOrder(backup.chats.map(normalizeChat))
+    await replaceChats(restoredChats)
+    setChats(restoredChats)
+    setSettings(normalizedSettings(backup.settings ?? defaultSettings))
+    setReadingPositions(backup.readingPositions ?? {})
+    setHomeBanner(backup.homeBanner)
+    setHomeLogo(backup.homeLogo)
+    if (backup.homeBanner) await setMeta('homeBanner', backup.homeBanner)
+    else await deleteMeta('homeBanner')
+    if (backup.homeLogo) await setMeta('homeLogo', backup.homeLogo)
+    else await deleteMeta('homeLogo')
+    openedChatRef.current = undefined
+    setSelectedId(restoredChats[0]?.id)
+    setRemoteBackup(null)
+
+    const driveFile = options?.driveFile
+    if (driveFile) {
+      const revisionAt =
+        backup.localRevisionAt ?? backup.exportedAt ?? driveFile.createdTime
+      setDriveState((current) => ({
+        ...current,
+        connected: true,
+        pausedForRemoteBackupId: undefined,
+        lastBackupAt: backup.exportedAt ?? driveFile.createdTime,
+        lastBackupFileId: driveFile.id,
+        lastLocalRevisionAt: revisionAt,
+        lastBackupLocalRevisionAt: revisionAt,
+      }))
+    } else if (options?.markLocalChange ?? true) {
+      markImportantChange()
+    }
+  }
 
   const restoreBackup = async (files: FileList | null) => {
     if (!files?.[0]) return
     try {
       const raw = await readFileAsText(files[0])
       const backup = JSON.parse(raw) as ViewerBackup
-      if (backup.app !== 'st-chat-viewer' || !Array.isArray(backup.chats)) {
-        throw new Error('챗서랍 백업 파일이 아닙니다.')
-      }
-      const restoredChats = sameChatOrder(backup.chats.map(normalizeChat))
-      await replaceChats(restoredChats)
-      setChats(restoredChats)
-      setSettings(normalizedSettings(backup.settings ?? defaultSettings))
-      if (backup.readingPositions) setReadingPositions(backup.readingPositions)
-      if (backup.homeBanner) {
-        setHomeBanner(backup.homeBanner)
-        await setMeta('homeBanner', backup.homeBanner)
-      }
-      if (backup.homeLogo) {
-        setHomeLogo(backup.homeLogo)
-        await setMeta('homeLogo', backup.homeLogo)
-      }
-      openedChatRef.current = undefined
-      setSelectedId(restoredChats[0]?.id)
+      await applyBackup(backup)
       setNotice('백업을 복원했습니다.')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '백업 복원 실패')
@@ -1055,11 +1271,279 @@ function App() {
     if (backupInputRef.current) backupInputRef.current.value = ''
   }
 
+  const checkDriveBackupFreshness = async () => {
+    const backups = await listDriveBackups()
+    const latest = backups[0]
+    if (!latest) {
+      setRemoteBackup(null)
+      return false
+    }
+    const localRevisionAt = driveState.lastLocalRevisionAt
+    const latestTime = new Date(latest.createdTime).getTime()
+    const localTime = localRevisionAt ? new Date(localRevisionAt).getTime() : 0
+    const isKnownBackup = latest.id === driveState.lastBackupFileId
+
+    if (!isKnownBackup && latestTime > localTime) {
+      setRemoteBackup(latest)
+      setDriveState((current) => ({
+        ...current,
+        pausedForRemoteBackupId: latest.id,
+      }))
+      return true
+    }
+    setRemoteBackup(null)
+    return false
+  }
+
+  const checkLatestDriveBackup = async () => {
+    if (driveBusy) return
+    setDriveBusy(true)
+    try {
+      const hasNewerBackup = await checkDriveBackupFreshness()
+      setNotice(
+        hasNewerBackup
+          ? 'Google Drive에 더 최신 백업이 있습니다.'
+          : 'Google Drive 백업을 확인했습니다.',
+      )
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Drive 백업 확인 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const connectGoogleDrive = async () => {
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken({ forcePrompt: true })
+      setDriveState((current) => ({ ...current, connected: true }))
+      await checkDriveBackupFreshness()
+      setNotice('Google Drive를 연결했습니다.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Google Drive 연결 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const disconnectGoogleDrive = () => {
+    forgetGoogleDriveToken()
+    setRemoteBackup(null)
+    setDriveState((current) => ({
+      ...current,
+      connected: false,
+      pausedForRemoteBackupId: undefined,
+    }))
+    setNotice('Google Drive 연결을 해제했습니다.')
+  }
+
+  const saveDriveBackup = async (mode: 'manual' | 'auto') => {
+    if (driveBusy) return
+    const revisionAt = driveState.lastLocalRevisionAt ?? new Date().toISOString()
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken()
+      const backup = buildBackup(revisionAt)
+      const uploaded = await uploadDriveBackup(backup)
+      setRemoteBackup(null)
+      setDriveState((current) => ({
+        ...current,
+        connected: true,
+        pausedForRemoteBackupId: undefined,
+        lastBackupAt: backup.exportedAt,
+        lastBackupFileId: uploaded.id,
+        lastLocalRevisionAt: revisionAt,
+        lastBackupLocalRevisionAt: revisionAt,
+      }))
+      if (mode === 'manual') setNotice('Google Drive에 백업을 저장했습니다.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Google Drive 백업 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const restoreDriveBackup = async (file?: DriveBackupFile) => {
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken()
+      const target = file ?? remoteBackup ?? (await listDriveBackups())[0]
+      if (!target) throw new Error('복원할 Google Drive 백업이 없습니다.')
+      const backup = await downloadDriveBackup(target.id)
+      await applyBackup(backup, { driveFile: target, markLocalChange: false })
+      setNotice('Google Drive 백업을 복원했습니다.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Google Drive 복원 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const pickDriveBackup = async () => {
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken()
+      const [picked] = await pickDriveFiles('backup')
+      if (!picked) return
+      const backup = await downloadDriveBackup(picked.id)
+      await applyBackup(
+        backup,
+        {
+          driveFile: {
+            id: picked.id,
+            name: picked.name,
+            createdTime: backup.exportedAt,
+            modifiedTime: backup.exportedAt,
+          },
+          markLocalChange: false,
+        },
+      )
+      setNotice('선택한 Drive 백업을 복원했습니다.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Drive 백업 선택 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const importDriveJsonl = async () => {
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken()
+      const picked = await pickDriveFiles('jsonl', { multiple: true })
+      if (!picked.length) return
+      const imported: ViewerChat[] = []
+      const warnings: string[] = []
+      const maxOrder = Math.max(0, ...chats.map((chat) => chat.sortOrder))
+
+      for (const [offset, file] of picked.entries()) {
+        if (!file.name.toLocaleLowerCase().endsWith('.jsonl')) {
+          warnings.push(`${file.name}: .jsonl 파일이 아닙니다.`)
+          continue
+        }
+        try {
+          const text = await downloadDriveText(file.id)
+          const { chat, errors } = parseSillyTavernJsonl(file.name, text)
+          chat.sortOrder = maxOrder + offset + 1
+          const normalized = normalizeChat(chat)
+          imported.push(normalized)
+          await saveChat(normalized)
+          if (errors.length) {
+            warnings.push(`${file.name}: ${errors.length}개 줄을 건너뜀`)
+          }
+        } catch (error) {
+          warnings.push(
+            `${file.name}: ${
+              error instanceof Error ? error.message : '불러오기 실패'
+            }`,
+          )
+        }
+      }
+
+      if (imported.length) {
+        markImportantChange()
+        const nextChats = sameChatOrder([...chats, ...imported])
+        setChats(nextChats)
+        setSelectedId(imported[imported.length - 1].id)
+        setNotice(`${imported.length}개 Drive 채팅을 보관함에 추가했습니다.`)
+      }
+      if (warnings.length) setNotice(warnings.join(' · '))
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Drive 파일 가져오기 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  const attachAssetsToSelectedChat = async (assets: ChatAsset[]) => {
+    if (!selectedChat || !assets.length) return
+    if (shareAssetsByCharacter && selectedCharacterKey) {
+      const targetIds = new Set(
+        chats
+          .filter(
+            (chat) => normalizeCharacterName(chat.characterName) === selectedCharacterKey,
+          )
+          .map((chat) => chat.id),
+      )
+      const updatedTargets: ViewerChat[] = []
+      const now = new Date().toISOString()
+      const nextChats = sameChatOrder(
+        chats.map((chat) => {
+          if (!targetIds.has(chat.id)) return chat
+          const copiedAssets = assets.map((asset) => ({
+            ...asset,
+            id: makeId('asset'),
+            addedAt: now,
+          }))
+          const updated = normalizeChat({
+            ...chat,
+            assets: [...chat.assets, ...copiedAssets],
+            updatedAt: now,
+          })
+          updatedTargets.push(updated)
+          return updated
+        }),
+      )
+      markImportantChange()
+      setChats(nextChats)
+      await saveChats(updatedTargets)
+      setNotice(
+        updatedTargets.length > 1
+          ? `${assets.length}개 이미지를 같은 캐릭터의 ${updatedTargets.length}개 채팅에 연결했습니다.`
+          : `${assets.length}개 이미지를 이 채팅에 연결했습니다.`,
+      )
+      return
+    }
+
+    await updateChat({ ...selectedChat, assets: [...selectedChat.assets, ...assets] })
+    setNotice(`${assets.length}개 이미지를 이 채팅에 연결했습니다.`)
+  }
+
+  const importDriveAssets = async () => {
+    if (!selectedChat) return
+    setDriveBusy(true)
+    try {
+      await requestGoogleDriveToken()
+      const picked = await pickDriveFiles('image', { multiple: true })
+      if (!picked.length) return
+      const now = new Date().toISOString()
+      const assets: ChatAsset[] = []
+      for (const file of picked) {
+        if (driveState.imageImportMode === 'drive') {
+          assets.push({
+            id: makeId('asset'),
+            filename: file.name,
+            type: file.mimeType ?? 'image/*',
+            dataUrl: '',
+            storage: 'drive',
+            driveFileId: file.id,
+            addedAt: now,
+          })
+        } else {
+          assets.push({
+            id: makeId('asset'),
+            filename: file.name,
+            type: file.mimeType ?? 'image/*',
+            dataUrl: await downloadDriveFileAsDataUrl(file),
+            storage: 'local',
+            addedAt: now,
+          })
+        }
+      }
+      await attachAssetsToSelectedChat(assets)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Drive 이미지 가져오기 실패')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
   const resetSettings = () => {
     const ok = window.confirm(
       '글꼴, 색상, 보기 옵션 등 모든 설정을 기본값으로 되돌릴까요? (채팅과 메모, 하이라이트는 유지됩니다.)',
     )
     if (!ok) return
+    markImportantChange()
     setSettings(defaultSettings)
     setNotice('설정을 기본값으로 되돌렸습니다.')
   }
@@ -1078,6 +1562,7 @@ function App() {
       return
     }
     await clearAllChats()
+    markImportantChange()
     saveReadingPositions({})
     await deleteMeta('homeBanner')
     await deleteMeta('homeLogo')
@@ -1657,7 +2142,7 @@ function App() {
               {displayMessages.map((message) => (
                 <MessageCard
                   key={message.id}
-                  chat={selectedChat}
+                  chat={displaySelectedChat ?? selectedChat}
                   message={message}
                   note={notes.find((item) => item.messageId === message.id)}
                   settings={settings}
@@ -1865,6 +2350,19 @@ function App() {
                   <Image size={16} />
                   이미지 에셋 (Zip) 등록
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void importDriveAssets()}
+                  disabled={!driveState.connected || driveBusy}
+                  title={
+                    driveState.connected
+                      ? 'Google Drive에서 이미지 선택'
+                      : 'Google Drive 연결 후 사용할 수 있습니다.'
+                  }
+                >
+                  <Cloud size={16} />
+                  Drive 이미지 에셋 등록
+                </button>
                 <label
                   className={
                     selectedCharacterKey
@@ -2031,10 +2529,32 @@ function App() {
         <SettingsModal
           settings={settings}
           homeLogo={homeLogo}
+          driveState={driveState}
+          driveBusy={driveBusy}
+          remoteBackup={remoteBackup}
           onHomeLogoPick={() => logoInputRef.current?.click()}
           onHomeLogoRemove={() => void removeHomeLogo()}
           onClose={() => setSettingsOpen(false)}
           onUpdate={updateSettings}
+          onDriveStateChange={(patch) =>
+            setDriveState((current) => ({ ...current, ...patch }))
+          }
+          onDriveConnect={() => void connectGoogleDrive()}
+          onDriveDisconnect={disconnectGoogleDrive}
+          onDriveBackupNow={() => void saveDriveBackup('manual')}
+          onDriveCheckLatest={() => void checkLatestDriveBackup()}
+          onDriveRestoreLatest={() => void restoreDriveBackup()}
+          onDrivePickBackup={() => void pickDriveBackup()}
+          onDriveImportJsonl={() => void importDriveJsonl()}
+          onDriveDismissRemote={() => {
+            if (!remoteBackup) return
+            setDriveState((current) => ({
+              ...current,
+              pausedForRemoteBackupId: remoteBackup.id,
+            }))
+            setRemoteBackup(null)
+            setNotice('Drive 복원을 나중에 다시 확인할 수 있습니다.')
+          }}
           onResetSettings={resetSettings}
           onResetAll={() => void resetEverything()}
         />
@@ -2993,22 +3513,228 @@ function WordMaskPanel({
   )
 }
 
+function GoogleDrivePanel({
+  driveState,
+  driveBusy,
+  remoteBackup,
+  onDriveStateChange,
+  onDriveConnect,
+  onDriveDisconnect,
+  onDriveBackupNow,
+  onDriveCheckLatest,
+  onDriveRestoreLatest,
+  onDrivePickBackup,
+  onDriveImportJsonl,
+  onDriveDismissRemote,
+}: {
+  driveState: GoogleDriveState
+  driveBusy: boolean
+  remoteBackup: DriveBackupFile | null
+  onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
+  onDriveConnect: () => void
+  onDriveDisconnect: () => void
+  onDriveBackupNow: () => void
+  onDriveCheckLatest: () => void
+  onDriveRestoreLatest: () => void
+  onDrivePickBackup: () => void
+  onDriveImportJsonl: () => void
+  onDriveDismissRemote: () => void
+}) {
+  const hasBackupPending =
+    Boolean(driveState.lastLocalRevisionAt) &&
+    driveState.lastLocalRevisionAt !== driveState.lastBackupLocalRevisionAt
+
+  return (
+    <section className="panel settings-wide settings-single drive-panel">
+      <h2>
+        <Cloud size={16} />
+        Google Drive
+      </h2>
+      <p className="setting-note">
+        Google Drive를 연결하면 수동/자동 백업 저장 및 복원, Drive 내 파일
+        가져오기를 사용할 수 있습니다.
+        <br />
+        연결하지 않으면 데이터는 현재 브라우저에만 저장되며, 브라우저 사이트
+        데이터 정리 시 초기화될 수 있습니다.
+      </p>
+
+      {remoteBackup && (
+        <div className="drive-alert">
+          <div>
+            <strong>Google Drive에 더 최신 백업이 있습니다.</strong>
+            <span>최신 데이터로 복원을 권장합니다.</span>
+          </div>
+          <div className="settings-button-row">
+            <button type="button" onClick={onDriveRestoreLatest} disabled={driveBusy}>
+              <Import size={16} />
+              복원하기
+            </button>
+            <button type="button" onClick={onDriveDismissRemote} disabled={driveBusy}>
+              나중에
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="settings-button-row">
+        {driveState.connected ? (
+          <button type="button" onClick={onDriveDisconnect} disabled={driveBusy}>
+            <X size={16} />
+            Google Drive 연결 해제
+          </button>
+        ) : (
+          <button type="button" onClick={onDriveConnect} disabled={driveBusy}>
+            <Cloud size={16} />
+            Google Drive 연결
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDriveCheckLatest}
+          disabled={driveBusy || !driveState.connected}
+        >
+          <RotateCcw size={16} />
+          최신 백업 확인
+        </button>
+        <button
+          type="button"
+          onClick={onDriveBackupNow}
+          disabled={driveBusy || !driveState.connected}
+        >
+          <Download size={16} />
+          Drive에 지금 백업
+        </button>
+        <button
+          type="button"
+          onClick={onDrivePickBackup}
+          disabled={driveBusy || !driveState.connected}
+        >
+          <Import size={16} />
+          Drive 백업 불러오기
+        </button>
+        <button
+          type="button"
+          onClick={onDriveImportJsonl}
+          disabled={driveBusy || !driveState.connected}
+        >
+          <FileText size={16} />
+          Drive에서 .jsonl 가져오기
+        </button>
+      </div>
+
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={driveState.autoBackupEnabled}
+          disabled={!driveState.connected}
+          onChange={(event) =>
+            onDriveStateChange({ autoBackupEnabled: event.currentTarget.checked })
+          }
+        />
+        <span className="check-copy">
+          자동 백업 사용
+          {hasBackupPending && <span className="shortcut-hint">백업 필요</span>}
+        </span>
+      </label>
+      <label>
+        자동 백업 간격
+        <select
+          value={String(driveState.autoBackupIntervalMinutes)}
+          disabled={!driveState.connected || !driveState.autoBackupEnabled}
+          onChange={(event) =>
+            onDriveStateChange({
+              autoBackupIntervalMinutes: Number(
+                event.currentTarget.value,
+              ) as DriveAutoBackupInterval,
+            })
+          }
+        >
+          <option value="5">5분</option>
+          <option value="10">10분</option>
+          <option value="30">30분</option>
+          <option value="60">1시간</option>
+        </select>
+      </label>
+      <p className="setting-note">
+        자동 백업은 현재 챗서랍 데이터를 Google Drive에 주기적으로 저장합니다.
+        <br />
+        다른 기기나 브라우저에서 더 최신 백업이 발견되면 자동 백업을
+        일시중지하고 복원을 먼저 권장합니다.
+      </p>
+
+      <label>
+        Drive 이미지 저장 방식
+        <select
+          value={driveState.imageImportMode}
+          disabled={!driveState.connected}
+          onChange={(event) =>
+            onDriveStateChange({
+              imageImportMode:
+                event.currentTarget.value === 'drive' ? 'drive' : 'local',
+            })
+          }
+        >
+          <option value="local">브라우저에 복사</option>
+          <option value="drive">Drive에서 불러오기</option>
+        </select>
+      </label>
+      <p className="setting-note">
+        브라우저에 복사하면 오프라인에서도 안정적입니다.
+        <br />
+        Drive에서 불러오기는 브라우저 저장공간을 적게 쓰지만 Google Drive 연결이
+        필요합니다.
+      </p>
+
+      <p className="setting-note">
+        개인정보처리방침:{' '}
+        <a href="./privacy.html" target="_blank" rel="noreferrer">
+          privacy.html
+        </a>
+      </p>
+    </section>
+  )
+}
+
 function SettingsModal({
   settings,
   homeLogo,
+  driveState,
+  driveBusy,
+  remoteBackup,
   onHomeLogoPick,
   onHomeLogoRemove,
   onClose,
   onUpdate,
+  onDriveStateChange,
+  onDriveConnect,
+  onDriveDisconnect,
+  onDriveBackupNow,
+  onDriveCheckLatest,
+  onDriveRestoreLatest,
+  onDrivePickBackup,
+  onDriveImportJsonl,
+  onDriveDismissRemote,
   onResetSettings,
   onResetAll,
 }: {
   settings: ViewerSettings
   homeLogo?: string
+  driveState: GoogleDriveState
+  driveBusy: boolean
+  remoteBackup: DriveBackupFile | null
   onHomeLogoPick: () => void
   onHomeLogoRemove: () => void
   onClose: () => void
   onUpdate: (patch: Partial<ViewerSettings>) => void
+  onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
+  onDriveConnect: () => void
+  onDriveDisconnect: () => void
+  onDriveBackupNow: () => void
+  onDriveCheckLatest: () => void
+  onDriveRestoreLatest: () => void
+  onDrivePickBackup: () => void
+  onDriveImportJsonl: () => void
+  onDriveDismissRemote: () => void
   onResetSettings: () => void
   onResetAll: () => void
 }) {
@@ -3169,6 +3895,21 @@ function SettingsModal({
               />
             </label>
           </section>
+
+          <GoogleDrivePanel
+            driveState={driveState}
+            driveBusy={driveBusy}
+            remoteBackup={remoteBackup}
+            onDriveStateChange={onDriveStateChange}
+            onDriveConnect={onDriveConnect}
+            onDriveDisconnect={onDriveDisconnect}
+            onDriveBackupNow={onDriveBackupNow}
+            onDriveCheckLatest={onDriveCheckLatest}
+            onDriveRestoreLatest={onDriveRestoreLatest}
+            onDrivePickBackup={onDrivePickBackup}
+            onDriveImportJsonl={onDriveImportJsonl}
+            onDriveDismissRemote={onDriveDismissRemote}
+          />
 
           <section className="panel">
             <h2>

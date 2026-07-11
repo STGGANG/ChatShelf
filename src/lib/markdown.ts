@@ -24,7 +24,7 @@ export function withImagePlaceholders(text: string, assets: ChatAsset[]) {
       assetMap.get(cleanName.toLocaleLowerCase()) ??
       assetMap.get(cleanName.split('/').pop()?.toLocaleLowerCase() ?? '')
 
-    if (!asset) return raw
+    if (!asset?.dataUrl) return raw
 
     return `\n\n![${escapeMarkdownText(cleanName)}](${asset.dataUrl})\n\n`
   })
