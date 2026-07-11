@@ -176,6 +176,51 @@ function normalizeAsset(asset: ChatAsset): ChatAsset {
   }
 }
 
+interface AssetBundle {
+  id: string
+  name: string
+  assets: ChatAsset[]
+  addedAt: string
+}
+
+function assetBundleKey(asset: ChatAsset) {
+  if (asset.bundleId) return asset.bundleId
+  if (asset.addedAt) return `legacy-${asset.addedAt}`
+  return asset.id
+}
+
+function buildAssetBundles(assets: ChatAsset[]): AssetBundle[] {
+  const bundles = new Map<string, AssetBundle>()
+  for (const asset of assets) {
+    const id = assetBundleKey(asset)
+    const current = bundles.get(id)
+    if (current) {
+      current.assets.push(asset)
+      continue
+    }
+    bundles.set(id, {
+      id,
+      name: asset.bundleName || asset.filename,
+      assets: [asset],
+      addedAt: asset.addedAt,
+    })
+  }
+
+  return [...bundles.values()]
+    .map((bundle) => {
+      const [firstAsset] = bundle.assets
+      return {
+        ...bundle,
+        name:
+          firstAsset.bundleName ||
+          (bundle.assets.length > 1
+            ? `${firstAsset.filename} 외 ${bundle.assets.length - 1}개`
+            : firstAsset.filename),
+      }
+    })
+    .sort((a, b) => b.addedAt.localeCompare(a.addedAt))
+}
+
 function normalizeChat(chat: ViewerChat): ViewerChat {
   return {
     ...chat,
@@ -475,7 +520,14 @@ function App() {
     }
   }, [assetLibraryMap, selectedChat])
   const selectedAssetIds = selectedChat?.assetIds ?? []
-  const currentAssets = displaySelectedChat?.assets ?? []
+  const currentAssets = useMemo(
+    () => displaySelectedChat?.assets ?? [],
+    [displaySelectedChat],
+  )
+  const currentAssetBundles = useMemo(
+    () => buildAssetBundles(currentAssets),
+    [currentAssets],
+  )
 
   const folderOptions = useMemo(
     () =>
@@ -967,15 +1019,20 @@ function App() {
       normalizeAsset({
         ...asset,
         id: makeId('asset'),
+        bundleId: asset.bundleId || makeId('bundle'),
+        bundleName: asset.bundleName || asset.filename,
         storage: 'local',
         driveFileId: undefined,
       }),
     )
+    const bundleCount = buildAssetBundles(libraryAssets).length
     const nextLibrary = [...assetLibrary, ...libraryAssets]
     setAssetLibrary(nextLibrary)
     await setMeta('assetLibrary', nextLibrary)
     await linkAssetIdsToSelectedChat(libraryAssets.map((asset) => asset.id))
-    setNotice(`${libraryAssets.length}개 에셋을 챗서랍에 저장하고 이 채팅에 연결했습니다.`)
+    setNotice(
+      `${bundleCount}개 에셋 묶음(${libraryAssets.length}개 이미지)을 챗서랍에 저장하고 이 채팅에 연결했습니다.`,
+    )
   }
 
   const importAssets = async (files: FileList | null) => {
@@ -984,6 +1041,8 @@ function App() {
     const now = new Date().toISOString()
     for (const file of Array.from(files)) {
       if (file.name.toLocaleLowerCase().endsWith('.zip')) {
+        const bundleId = makeId('bundle')
+        const bundleName = file.name
         const { default: JSZip } = await import('jszip')
         const zip = await JSZip.loadAsync(file)
         for (const entry of Object.values(zip.files)) {
@@ -997,6 +1056,8 @@ function App() {
             filename: imageFile.name,
             type: imageFile.type,
             dataUrl: await readFileAsDataUrl(imageFile),
+            bundleId,
+            bundleName,
             addedAt: now,
           })
         }
@@ -1004,11 +1065,14 @@ function App() {
       }
 
       if (file.type.startsWith('image/')) {
+        const bundleId = makeId('bundle')
         assets.push({
           id: makeId('asset'),
           filename: file.name,
           type: file.type,
           dataUrl: await readFileAsDataUrl(file),
+          bundleId,
+          bundleName: file.name,
           addedAt: now,
         })
       }
@@ -1351,6 +1415,8 @@ function App() {
           file.mimeType === 'application/zip' ||
           file.mimeType === 'application/x-zip-compressed'
         if (isZip) {
+          const bundleId = makeId('bundle')
+          const bundleName = file.name
           const { default: JSZip } = await import('jszip')
           const blob = await downloadDriveFileAsBlob(file.id)
           const zip = await JSZip.loadAsync(blob)
@@ -1367,6 +1433,8 @@ function App() {
               filename: imageFile.name,
               type: imageFile.type,
               dataUrl: await readFileAsDataUrl(imageFile),
+              bundleId,
+              bundleName,
               storage: 'local',
               addedAt: now,
             })
@@ -1379,11 +1447,14 @@ function App() {
           /\.(png|jpe?g|gif|webp|avif)$/i.test(file.name)
         if (!isImage) continue
 
+        const bundleId = makeId('bundle')
         assets.push({
           id: makeId('asset'),
           filename: file.name,
           type: file.mimeType ?? 'image/*',
           dataUrl: await downloadDriveFileAsDataUrl(file),
+          bundleId,
+          bundleName: file.name,
           storage: 'local',
           addedAt: now,
         })
@@ -1396,32 +1467,28 @@ function App() {
     }
   }
 
-  const unlinkAssetFromSelectedChat = async (asset: ChatAsset) => {
+  const unlinkAssetBundleFromSelectedChat = async (bundle: AssetBundle) => {
     if (!selectedChat) return
-    const isLibraryAsset = selectedChat.assetIds?.includes(asset.id)
-    if (isLibraryAsset) {
-      await updateChat({
-        ...selectedChat,
-        assetIds: (selectedChat.assetIds ?? []).filter((id) => id !== asset.id),
-      })
-      setNotice('이 채팅에서 에셋 연결을 해제했습니다.')
-      return
-    }
-
+    const bundleAssetIds = new Set(bundle.assets.map((asset) => asset.id))
     await updateChat({
       ...selectedChat,
-      assets: selectedChat.assets.filter((item) => item.id !== asset.id),
+      assetIds: (selectedChat.assetIds ?? []).filter(
+        (id) => !bundleAssetIds.has(id),
+      ),
+      assets: selectedChat.assets.filter((asset) => !bundleAssetIds.has(asset.id)),
     })
-    setNotice('이 채팅에서 에셋을 제거했습니다.')
+    setNotice('이 채팅에서 에셋 묶음 연결을 해제했습니다.')
   }
 
-  const deleteLibraryAsset = async (assetId: string) => {
-    const nextLibrary = assetLibrary.filter((asset) => asset.id !== assetId)
+  const deleteLibraryAssets = async (assetIds: string[]) => {
+    if (!assetIds.length) return
+    const assetIdSet = new Set(assetIds)
+    const nextLibrary = assetLibrary.filter((asset) => !assetIdSet.has(asset.id))
     const updatedChats = chats
-      .filter((chat) => chat.assetIds?.includes(assetId))
+      .filter((chat) => chat.assetIds?.some((id) => assetIdSet.has(id)))
       .map((chat) => ({
         ...chat,
-        assetIds: (chat.assetIds ?? []).filter((id) => id !== assetId),
+        assetIds: (chat.assetIds ?? []).filter((id) => !assetIdSet.has(id)),
         updatedAt: new Date().toISOString(),
       }))
 
@@ -1438,7 +1505,7 @@ function App() {
       )
       await saveChats(updatedChats)
     }
-    setNotice('챗서랍 에셋을 삭제했습니다.')
+    setNotice('챗서랍 에셋 묶음을 삭제했습니다.')
   }
 
   const resetSettings = () => {
@@ -2300,28 +2367,28 @@ function App() {
               </div>
               <div className="asset-list">
                 <span className="asset-list-title">
-                  현재 채팅에 연결된 에셋 목록
+                  현재 채팅에 연결된 에셋
                 </span>
-                {currentAssets.length ? (
-                  currentAssets.map((asset) => (
-                    <div className="asset-row" key={asset.id}>
-                      {asset.dataUrl ? (
-                        <img src={asset.dataUrl} alt="" />
-                      ) : (
-                        <span className="asset-thumb-empty">
-                          <Image size={14} />
-                        </span>
-                      )}
-                      <span title={asset.filename}>{asset.filename}</span>
-                      <button
-                        type="button"
-                        title="에셋 연결 해제"
-                        onClick={() => void unlinkAssetFromSelectedChat(asset)}
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))
+                {currentAssetBundles.length ? (
+                  <div className="asset-summary">
+                    <p>
+                      <strong>{currentAssetBundles.length}개 묶음</strong>
+                      <span>이미지 {currentAssets.length}개</span>
+                    </p>
+                    {currentAssetBundles.map((bundle) => (
+                      <div className="asset-summary-row" key={bundle.id}>
+                        <span title={bundle.name}>{bundle.name}</span>
+                        <small>{bundle.assets.length}개</small>
+                        <button
+                          type="button"
+                          title="에셋 묶음 연결 해제"
+                          onClick={() => void unlinkAssetBundleFromSelectedChat(bundle)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <p className="muted">연결된 이미지 에셋이 없습니다.</p>
                 )}
@@ -2510,7 +2577,7 @@ function App() {
             setAssetGalleryOpen(false)
             void linkAssetIdsToSelectedChat(assetIds)
           }}
-          onDelete={(assetId) => void deleteLibraryAsset(assetId)}
+          onDelete={(assetIds) => void deleteLibraryAssets(assetIds)}
         />
       )}
 
@@ -3721,20 +3788,34 @@ function AssetGalleryModal({
   linkedIds: string[]
   onClose: () => void
   onLink: (assetIds: string[]) => void
-  onDelete: (assetId: string) => void
+  onDelete: (assetIds: string[]) => void
 }) {
   const linkedSet = useMemo(() => new Set(linkedIds), [linkedIds])
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
-  const selectableAssets = assets.filter((asset) => !linkedSet.has(asset.id))
+  const bundles = useMemo(() => buildAssetBundles(assets), [assets])
+  const [selectedBundleIds, setSelectedBundleIds] = useState<string[]>([])
+  const selectedBundleSet = useMemo(
+    () => new Set(selectedBundleIds),
+    [selectedBundleIds],
+  )
+  const selectableBundles = bundles.filter((bundle) =>
+    bundle.assets.some((asset) => !linkedSet.has(asset.id)),
+  )
 
-  const toggleAsset = (assetId: string) => {
-    setSelectedIds((current) =>
-      current.includes(assetId)
-        ? current.filter((id) => id !== assetId)
-        : [...current, assetId],
+  const toggleBundle = (bundleId: string) => {
+    setSelectedBundleIds((current) =>
+      current.includes(bundleId)
+        ? current.filter((id) => id !== bundleId)
+        : [...current, bundleId],
     )
   }
+
+  const selectedAssetIds = bundles
+    .filter((bundle) => selectedBundleSet.has(bundle.id))
+    .flatMap((bundle) =>
+      bundle.assets
+        .filter((asset) => !linkedSet.has(asset.id))
+        .map((asset) => asset.id),
+    )
 
   return (
     <div className="modal-backdrop compact-backdrop" role="presentation">
@@ -3752,11 +3833,16 @@ function AssetGalleryModal({
             <X size={18} />
           </button>
         </header>
-        {assets.length ? (
+        {bundles.length ? (
           <div className="asset-gallery-grid">
-            {assets.map((asset) => {
-              const linked = linkedSet.has(asset.id)
-              const selected = selectedSet.has(asset.id)
+            {bundles.map((bundle) => {
+              const coverAsset = bundle.assets.find((asset) => asset.dataUrl)
+              const linkedCount = bundle.assets.filter((asset) =>
+                linkedSet.has(asset.id),
+              ).length
+              const linked = linkedCount === bundle.assets.length
+              const partial = linkedCount > 0 && !linked
+              const selected = selectedBundleSet.has(bundle.id)
               return (
                 <div
                   className={
@@ -3766,33 +3852,42 @@ function AssetGalleryModal({
                         ? 'asset-gallery-card linked'
                         : 'asset-gallery-card'
                   }
-                  key={asset.id}
+                  key={bundle.id}
                 >
                   <button
                     type="button"
                     className="asset-gallery-main"
                     disabled={linked}
-                    onClick={() => toggleAsset(asset.id)}
+                    onClick={() => toggleBundle(bundle.id)}
                   >
-                    {asset.dataUrl ? (
-                      <img src={asset.dataUrl} alt="" />
+                    {coverAsset?.dataUrl ? (
+                      <img src={coverAsset.dataUrl} alt="" />
                     ) : (
                       <span className="asset-thumb-empty">
                         <Image size={18} />
                       </span>
                     )}
-                    <span title={asset.filename}>{asset.filename}</span>
-                    <small>{linked ? '연동됨' : selected ? '선택됨' : '선택'}</small>
+                    <span title={bundle.name}>{bundle.name}</span>
+                    <small>
+                      {bundle.assets.length}개 이미지 ·{' '}
+                      {linked
+                        ? '연동됨'
+                        : selected
+                          ? '선택됨'
+                          : partial
+                            ? `${linkedCount}개 연동됨`
+                            : '선택'}
+                    </small>
                   </button>
                   <button
                     type="button"
                     className="asset-gallery-delete"
                     title="삭제"
                     onClick={() => {
-                      setSelectedIds((current) =>
-                        current.filter((id) => id !== asset.id),
+                      setSelectedBundleIds((current) =>
+                        current.filter((id) => id !== bundle.id),
                       )
-                      onDelete(asset.id)
+                      onDelete(bundle.assets.map((asset) => asset.id))
                     }}
                   >
                     <Trash2 size={14} />
@@ -3807,10 +3902,8 @@ function AssetGalleryModal({
         <div className="modal-actions">
           <button
             type="button"
-            onClick={() =>
-              onLink(selectedIds.filter((id) => assets.some((asset) => asset.id === id)))
-            }
-            disabled={!selectedIds.length || !selectableAssets.length}
+            onClick={() => onLink(selectedAssetIds)}
+            disabled={!selectedAssetIds.length || !selectableBundles.length}
           >
             <Check size={16} />
             선택한 에셋 연동
