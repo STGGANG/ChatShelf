@@ -51,18 +51,21 @@ import {
 } from './lib/defaults'
 import {
   backupToBlob,
+  blobToDataUrl,
+  dataUrlToBlob,
   downloadBlob,
+  makeImageThumbnailDataUrl,
   readFileAsDataUrl,
   readFileAsText,
 } from './lib/files'
 import {
   applyHighlightsToElement,
   renderMarkdown,
+  selectImagePlaceholderAssets,
   stripMarkdownForSnippet,
 } from './lib/markdown'
 import {
   downloadDriveBackup,
-  downloadDriveFileAsDataUrl,
   downloadDriveFileAsBlob,
   downloadDriveText,
   forgetGoogleDriveToken,
@@ -75,10 +78,14 @@ import {
 import { parseSillyTavernJsonl } from './lib/parser'
 import {
   clearAllChats,
+  clearAssetBlobs,
   deleteChat,
+  deleteAssetBlobs,
   deleteMeta,
+  getAssetBlob,
   getChats,
   getMeta,
+  putAssetBlob,
   replaceChats,
   saveChat,
   saveChats,
@@ -183,6 +190,11 @@ interface AssetBundle {
   addedAt: string
 }
 
+interface AssetRegistration {
+  asset: ChatAsset
+  blob?: Blob
+}
+
 function assetBundleKey(asset: ChatAsset) {
   if (asset.bundleId) return asset.bundleId
   if (asset.addedAt) return `legacy-${asset.addedAt}`
@@ -219,6 +231,125 @@ function buildAssetBundles(assets: ChatAsset[]): AssetBundle[] {
       }
     })
     .sort((a, b) => b.addedAt.localeCompare(a.addedAt))
+}
+
+async function createAssetRegistration({
+  blob,
+  filename,
+  type,
+  bundleId,
+  bundleName,
+  addedAt,
+}: {
+  blob: Blob
+  filename: string
+  type?: string
+  bundleId: string
+  bundleName: string
+  addedAt: string
+}): Promise<AssetRegistration> {
+  const assetId = makeId('asset')
+  const safeType = type || blob.type || 'image/*'
+  const storedBlob = blob.type ? blob : blob.slice(0, blob.size, safeType)
+  return {
+    asset: {
+      id: assetId,
+      filename,
+      type: safeType,
+      dataUrl: '',
+      thumbnailDataUrl: await makeImageThumbnailDataUrl(storedBlob),
+      blobKey: assetId,
+      blobStored: true,
+      bundleId,
+      bundleName,
+      storage: 'local',
+      addedAt,
+    },
+    blob: storedBlob,
+  }
+}
+
+async function storeAssetPayloads(assets: ChatAsset[]) {
+  let changed = false
+  const storedAssets: ChatAsset[] = []
+
+  for (const asset of assets.map(normalizeAsset)) {
+    const key = asset.blobKey || asset.id
+    if (asset.dataUrl) {
+      try {
+        const blob = dataUrlToBlob(asset.dataUrl)
+        await putAssetBlob(key, blob, asset.type || blob.type)
+        storedAssets.push({
+          ...asset,
+          type: asset.type || blob.type || 'image/*',
+          dataUrl: '',
+          thumbnailDataUrl:
+            asset.thumbnailDataUrl || (await makeImageThumbnailDataUrl(blob)),
+          blobKey: key,
+          blobStored: true,
+          storage: 'local',
+        })
+        changed = true
+        continue
+      } catch {
+        storedAssets.push(asset)
+        continue
+      }
+    }
+    storedAssets.push(asset)
+  }
+
+  return { assets: storedAssets, changed }
+}
+
+async function hydrateAssetsForBackup(assets: ChatAsset[]) {
+  const backupAssets: ChatAsset[] = []
+
+  for (const asset of assets.map(normalizeAsset)) {
+    if (asset.dataUrl) {
+      backupAssets.push(asset)
+      continue
+    }
+
+    const blobRecord = await getAssetBlob(asset.blobKey || asset.id)
+    if (!blobRecord) {
+      backupAssets.push(asset)
+      continue
+    }
+
+    backupAssets.push({
+      ...asset,
+      dataUrl: await blobToDataUrl(blobRecord.blob),
+    })
+  }
+
+  return backupAssets
+}
+
+async function storeChatAssetPayloads(chats: ViewerChat[]) {
+  let changed = false
+  const storedChats: ViewerChat[] = []
+
+  for (const chat of chats) {
+    const stored = await storeAssetPayloads(chat.assets)
+    changed = changed || stored.changed
+    storedChats.push({ ...chat, assets: stored.assets })
+  }
+
+  return { chats: storedChats, changed }
+}
+
+async function hydrateChatsForBackup(chats: ViewerChat[]) {
+  const backupChats: ViewerChat[] = []
+
+  for (const chat of chats) {
+    backupChats.push({
+      ...chat,
+      assets: await hydrateAssetsForBackup(chat.assets),
+    })
+  }
+
+  return backupChats
 }
 
 function normalizeChat(chat: ViewerChat): ViewerChat {
@@ -372,11 +503,14 @@ function App() {
   const [driveBackupsLoaded, setDriveBackupsLoaded] = useState(false)
 
   useEffect(() => {
-    getChats().then((items) => {
+    getChats().then(async (items) => {
       const ordered = sameChatOrder(items.map(normalizeChat))
-      setChats(ordered)
+      const stored = await storeChatAssetPayloads(ordered)
+      const normalizedChats = stored.chats
+      if (stored.changed) await saveChats(normalizedChats)
+      setChats(normalizedChats)
       const localRevisionAt = newestDate(
-        ...ordered.map((chat) => chat.updatedAt ?? chat.importedAt),
+        ...normalizedChats.map((chat) => chat.updatedAt ?? chat.importedAt),
       )
       if (localRevisionAt) {
         setDriveState((current) =>
@@ -386,8 +520,8 @@ function App() {
         )
       }
       const lastId = localStorage.getItem('st-chat-viewer:lastChat') ?? undefined
-      const restored = ordered.find((chat) => chat.id === lastId)?.id
-      setSelectedId((current) => current ?? restored ?? ordered[0]?.id)
+      const restored = normalizedChats.find((chat) => chat.id === lastId)?.id
+      setSelectedId((current) => current ?? restored ?? normalizedChats[0]?.id)
     })
   }, [])
 
@@ -398,8 +532,10 @@ function App() {
     void getMeta<string>('homeLogo').then((value) => {
       if (value) setHomeLogo(value)
     })
-    void getMeta<ChatAsset[]>('assetLibrary').then((value) => {
-      setAssetLibrary((value ?? []).map(normalizeAsset))
+    void getMeta<ChatAsset[]>('assetLibrary').then(async (value) => {
+      const stored = await storeAssetPayloads(value ?? [])
+      setAssetLibrary(stored.assets)
+      if (stored.changed) await setMeta('assetLibrary', stored.assets)
     })
   }, [])
 
@@ -434,19 +570,26 @@ function App() {
   }, [notice])
 
   const buildBackup = useCallback(
-    (localRevisionAt?: string): ViewerBackup => ({
-      app: 'st-chat-viewer',
-      version: backupVersion,
-      exportedAt: new Date().toISOString(),
-      localRevisionAt:
-        localRevisionAt ?? driveState.lastLocalRevisionAt ?? new Date().toISOString(),
-      chats,
-      settings,
-      readingPositions,
-      homeBanner,
-      homeLogo,
-      assetLibrary,
-    }),
+    async (localRevisionAt?: string): Promise<ViewerBackup> => {
+      const [backupChats, backupAssets] = await Promise.all([
+        hydrateChatsForBackup(chats),
+        hydrateAssetsForBackup(assetLibrary),
+      ])
+
+      return {
+        app: 'st-chat-viewer',
+        version: backupVersion,
+        exportedAt: new Date().toISOString(),
+        localRevisionAt:
+          localRevisionAt ?? driveState.lastLocalRevisionAt ?? new Date().toISOString(),
+        chats: backupChats,
+        settings,
+        readingPositions,
+        homeBanner,
+        homeLogo,
+        assetLibrary: backupAssets,
+      }
+    },
     [
       chats,
       settings,
@@ -1013,16 +1156,23 @@ function App() {
     await updateChat({ ...selectedChat, assetIds: nextIds })
   }
 
-  const registerAssetsToLibrary = async (assets: ChatAsset[]) => {
-    if (!selectedChat || !assets.length) return
-    const libraryAssets = assets.map((asset) =>
+  const registerAssetsToLibrary = async (registrations: AssetRegistration[]) => {
+    if (!selectedChat || !registrations.length) return
+    const libraryAssets = registrations.map(({ asset }) =>
       normalizeAsset({
         ...asset,
-        id: makeId('asset'),
+        id: asset.id || makeId('asset'),
         bundleId: asset.bundleId || makeId('bundle'),
         bundleName: asset.bundleName || asset.filename,
         storage: 'local',
         driveFileId: undefined,
+      }),
+    )
+    await Promise.all(
+      registrations.map(async ({ blob }, index) => {
+        if (!blob) return
+        const asset = libraryAssets[index]
+        await putAssetBlob(asset.blobKey || asset.id, blob, asset.type)
       }),
     )
     const bundleCount = buildAssetBundles(libraryAssets).length
@@ -1037,7 +1187,7 @@ function App() {
 
   const importAssets = async (files: FileList | null) => {
     if (!files?.length || !selectedChat) return
-    const assets: ChatAsset[] = []
+    const assets: AssetRegistration[] = []
     const now = new Date().toISOString()
     for (const file of Array.from(files)) {
       if (file.name.toLocaleLowerCase().endsWith('.zip')) {
@@ -1051,30 +1201,28 @@ function App() {
           const imageFile = new File([blob], entry.name.split('/').pop() ?? entry.name, {
             type: blob.type || 'image/*',
           })
-          assets.push({
-            id: makeId('asset'),
+          assets.push(await createAssetRegistration({
+            blob,
             filename: imageFile.name,
             type: imageFile.type,
-            dataUrl: await readFileAsDataUrl(imageFile),
             bundleId,
             bundleName,
             addedAt: now,
-          })
+          }))
         }
         continue
       }
 
       if (file.type.startsWith('image/')) {
         const bundleId = makeId('bundle')
-        assets.push({
-          id: makeId('asset'),
+        assets.push(await createAssetRegistration({
+          blob: file,
           filename: file.name,
           type: file.type,
-          dataUrl: await readFileAsDataUrl(file),
           bundleId,
           bundleName: file.name,
           addedAt: now,
-        })
+        }))
       }
     }
     await registerAssetsToLibrary(assets)
@@ -1183,9 +1331,10 @@ function App() {
 
   const exportBackup = async () => {
     const stamp = new Date().toISOString().slice(0, 10)
+    const backup = await buildBackup()
     await downloadBlob(
       `chatshelf-backup-${stamp}.json`,
-      backupToBlob(buildBackup()),
+      backupToBlob(backup),
     )
     setNotice('백업 파일을 저장했습니다.')
   }
@@ -1198,10 +1347,12 @@ function App() {
       throw new Error('챗서랍 백업 파일이 아닙니다.')
     }
     const restoredChats = sameChatOrder(backup.chats.map(normalizeChat))
-    const restoredAssets = (backup.assetLibrary ?? []).map(normalizeAsset)
-    await replaceChats(restoredChats)
-    setChats(restoredChats)
-    setAssetLibrary(restoredAssets)
+    await clearAssetBlobs()
+    const storedChats = await storeChatAssetPayloads(restoredChats)
+    const storedAssets = await storeAssetPayloads(backup.assetLibrary ?? [])
+    await replaceChats(storedChats.chats)
+    setChats(storedChats.chats)
+    setAssetLibrary(storedAssets.assets)
     setSettings(normalizedSettings(backup.settings ?? defaultSettings))
     setReadingPositions(backup.readingPositions ?? {})
     setHomeBanner(backup.homeBanner)
@@ -1210,10 +1361,10 @@ function App() {
     else await deleteMeta('homeBanner')
     if (backup.homeLogo) await setMeta('homeLogo', backup.homeLogo)
     else await deleteMeta('homeLogo')
-    if (restoredAssets.length) await setMeta('assetLibrary', restoredAssets)
+    if (storedAssets.assets.length) await setMeta('assetLibrary', storedAssets.assets)
     else await deleteMeta('assetLibrary')
     openedChatRef.current = undefined
-    setSelectedId(restoredChats[0]?.id)
+    setSelectedId(storedChats.chats[0]?.id)
     setRemoteBackup(null)
 
     const driveFile = options?.driveFile
@@ -1306,7 +1457,7 @@ function App() {
     setDriveBusy(true)
     try {
       await requestGoogleDriveToken()
-      const backup = buildBackup(revisionAt)
+      const backup = await buildBackup(revisionAt)
       const uploaded = await uploadDriveBackup(backup)
       const backups = await listDriveBackups()
       setDriveBackups(backups)
@@ -1407,7 +1558,7 @@ function App() {
       const picked = await pickDriveFiles({ multiple: true })
       if (!picked.length) return
       const now = new Date().toISOString()
-      const assets: ChatAsset[] = []
+      const assets: AssetRegistration[] = []
       for (const file of picked) {
         const lowerName = file.name.toLocaleLowerCase()
         const isZip =
@@ -1428,16 +1579,14 @@ function App() {
               entry.name.split('/').pop() ?? entry.name,
               { type: imageBlob.type || 'image/*' },
             )
-            assets.push({
-              id: makeId('asset'),
+            assets.push(await createAssetRegistration({
+              blob: imageBlob,
               filename: imageFile.name,
               type: imageFile.type,
-              dataUrl: await readFileAsDataUrl(imageFile),
               bundleId,
               bundleName,
-              storage: 'local',
               addedAt: now,
-            })
+            }))
           }
           continue
         }
@@ -1448,16 +1597,15 @@ function App() {
         if (!isImage) continue
 
         const bundleId = makeId('bundle')
-        assets.push({
-          id: makeId('asset'),
+        const imageBlob = await downloadDriveFileAsBlob(file.id)
+        assets.push(await createAssetRegistration({
+          blob: imageBlob,
           filename: file.name,
-          type: file.mimeType ?? 'image/*',
-          dataUrl: await downloadDriveFileAsDataUrl(file),
+          type: file.mimeType ?? imageBlob.type ?? 'image/*',
           bundleId,
           bundleName: file.name,
-          storage: 'local',
           addedAt: now,
-        })
+        }))
       }
       await registerAssetsToLibrary(assets)
     } catch (error) {
@@ -1495,6 +1643,11 @@ function App() {
     markImportantChange()
     setAssetLibrary(nextLibrary)
     await setMeta('assetLibrary', nextLibrary)
+    await deleteAssetBlobs(
+      assetLibrary
+        .filter((asset) => assetIdSet.has(asset.id))
+        .map((asset) => asset.blobKey || asset.id),
+    )
 
     if (updatedChats.length) {
       const updatedMap = new Map(updatedChats.map((chat) => [chat.id, chat]))
@@ -1537,6 +1690,7 @@ function App() {
     await deleteMeta('homeBanner')
     await deleteMeta('homeLogo')
     await deleteMeta('assetLibrary')
+    await clearAssetBlobs()
     setHomeBanner(undefined)
     setHomeLogo(undefined)
     setAssetLibrary([])
@@ -2989,9 +3143,53 @@ function MarkdownChunk({
   highlights: MessageHighlight[]
   maskRules: WordMaskRule[]
 }) {
-  const html = useMemo(
-    () => renderMarkdown(text, assets),
+  const placeholderAssets = useMemo(
+    () => selectImagePlaceholderAssets(text, assets),
     [assets, text],
+  )
+  const [runtimeAssets, setRuntimeAssets] = useState<ChatAsset[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const objectUrls: string[] = []
+
+    const loadAssets = async () => {
+      if (!placeholderAssets.length) {
+        if (!cancelled) {
+          setRuntimeAssets((current) => (current.length ? [] : current))
+        }
+        return
+      }
+
+      const loadedAssets = await Promise.all(
+        placeholderAssets.map(async (asset) => {
+          if (asset.dataUrl) return asset
+          const blobRecord = await getAssetBlob(asset.blobKey || asset.id)
+          if (!blobRecord) return asset
+          const objectUrl = URL.createObjectURL(blobRecord.blob)
+          objectUrls.push(objectUrl)
+          return { ...asset, dataUrl: objectUrl }
+        }),
+      )
+
+      if (cancelled) {
+        objectUrls.forEach((url) => URL.revokeObjectURL(url))
+        return
+      }
+      setRuntimeAssets(loadedAssets)
+    }
+
+    void loadAssets()
+
+    return () => {
+      cancelled = true
+      objectUrls.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [placeholderAssets])
+
+  const html = useMemo(
+    () => renderMarkdown(text, runtimeAssets),
+    [runtimeAssets, text],
   )
   const bodyRef = useRef<HTMLDivElement>(null)
   const highlightSignature = useMemo(
@@ -3836,7 +4034,9 @@ function AssetGalleryModal({
         {bundles.length ? (
           <div className="asset-gallery-grid">
             {bundles.map((bundle) => {
-              const coverAsset = bundle.assets.find((asset) => asset.dataUrl)
+              const coverAsset = bundle.assets.find(
+                (asset) => asset.thumbnailDataUrl || asset.dataUrl,
+              )
               const linkedCount = bundle.assets.filter((asset) =>
                 linkedSet.has(asset.id),
               ).length
@@ -3860,8 +4060,13 @@ function AssetGalleryModal({
                     disabled={linked}
                     onClick={() => toggleBundle(bundle.id)}
                   >
-                    {coverAsset?.dataUrl ? (
-                      <img src={coverAsset.dataUrl} alt="" />
+                    {coverAsset?.thumbnailDataUrl || coverAsset?.dataUrl ? (
+                      <img
+                        src={coverAsset.thumbnailDataUrl || coverAsset.dataUrl}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <span className="asset-thumb-empty">
                         <Image size={18} />

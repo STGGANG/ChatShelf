@@ -102,6 +102,9 @@ export interface ChatAsset {
   filename: string
   type: string
   dataUrl: string
+  thumbnailDataUrl?: string
+  blobKey?: string
+  blobStored?: boolean
   bundleId?: string
   bundleName?: string
   storage?: DriveImageMode

@@ -11,6 +11,25 @@ function escapeMarkdownText(value: string) {
   return value.replace(/[[\]\\]/g, '\\$&')
 }
 
+export function selectImagePlaceholderAssets(text: string, assets: ChatAsset[]) {
+  if (!assets.length || !text.includes('{{img::')) return []
+  const assetMap = new Map(
+    assets.map((asset) => [asset.filename.toLocaleLowerCase(), asset]),
+  )
+  const picked = new Map<string, ChatAsset>()
+
+  text.replace(/\{\{img::([^}]+)\}\}/g, (_raw, fileName: string) => {
+    const cleanName = String(fileName).trim()
+    const asset =
+      assetMap.get(cleanName.toLocaleLowerCase()) ??
+      assetMap.get(cleanName.split('/').pop()?.toLocaleLowerCase() ?? '')
+    if (asset) picked.set(asset.id, asset)
+    return ''
+  })
+
+  return [...picked.values()]
+}
+
 export function withImagePlaceholders(text: string, assets: ChatAsset[]) {
   if (!assets.length) return text
 
@@ -37,7 +56,7 @@ export function renderMarkdown(text: string, assets: ChatAsset[]) {
   return DOMPurify.sanitize(html, {
     ADD_ATTR: ['target', 'rel'],
     ALLOWED_URI_REGEXP:
-      /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+      /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data|blob):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
   })
 }
 

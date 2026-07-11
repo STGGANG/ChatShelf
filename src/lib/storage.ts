@@ -6,9 +6,17 @@ interface MetaEntry {
   value: unknown
 }
 
+export interface AssetBlobRecord {
+  id: string
+  blob: Blob
+  type: string
+  updatedAt: string
+}
+
 class ViewerDatabase extends Dexie {
   chats!: Table<ViewerChat, string>
   meta!: Table<MetaEntry, string>
+  assetBlobs!: Table<AssetBlobRecord, string>
 
   constructor() {
     super('SillyTavernChatViewer')
@@ -18,6 +26,11 @@ class ViewerDatabase extends Dexie {
     this.version(2).stores({
       chats: 'id, title, folder, sortOrder, importedAt, updatedAt',
       meta: 'key',
+    })
+    this.version(3).stores({
+      chats: 'id, title, folder, sortOrder, importedAt, updatedAt',
+      meta: 'key',
+      assetBlobs: 'id, updatedAt',
     })
   }
 }
@@ -77,4 +90,26 @@ export async function replaceChats(chats: ViewerChat[]) {
 
 export async function clearAllChats() {
   await db.chats.clear()
+}
+
+export async function getAssetBlob(id: string) {
+  return db.assetBlobs.get(id)
+}
+
+export async function putAssetBlob(id: string, blob: Blob, type?: string) {
+  await db.assetBlobs.put({
+    id,
+    blob,
+    type: type || blob.type || 'application/octet-stream',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+export async function deleteAssetBlobs(ids: string[]) {
+  if (!ids.length) return
+  await db.assetBlobs.bulkDelete(ids)
+}
+
+export async function clearAssetBlobs() {
+  await db.assetBlobs.clear()
 }
