@@ -369,11 +369,6 @@ export async function downloadDriveFileAsBlob(fileId: string) {
   return driveBlob(`/files/${fileId}?alt=media`)
 }
 
-export async function downloadDriveFileAsObjectUrl(fileId: string) {
-  const blob = await driveBlob(`/files/${fileId}?alt=media`)
-  return URL.createObjectURL(blob)
-}
-
 export async function pickDriveFiles(options?: { multiple?: boolean }) {
   await ensurePicker()
   const api = window as GoogleDriveWindow

@@ -42,6 +42,7 @@ export async function getChats() {
   return chats.map((chat) => ({
     ...chat,
     assets: chat.assets ?? [],
+    assetIds: chat.assetIds ?? [],
     notes: chat.notes ?? [],
     highlights: chat.highlights ?? [],
     messages: chat.messages.map((message) => ({

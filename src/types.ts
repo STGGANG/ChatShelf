@@ -145,6 +145,7 @@ export interface ViewerChat {
   favorite?: boolean
   messages: ViewerMessage[]
   assets: ChatAsset[]
+  assetIds?: string[]
   notes: MessageNote[]
   highlights: MessageHighlight[]
   wordMaskEnabled: boolean
@@ -199,7 +200,6 @@ export interface ViewerSettings {
 
 export interface GoogleDriveState {
   connected: boolean
-  imageImportMode: DriveImageMode
   lastBackupAt?: string
   lastBackupFileId?: string
   lastLocalRevisionAt?: string
@@ -213,6 +213,7 @@ export interface ViewerBackup {
   exportedAt: string
   localRevisionAt?: string
   chats: ViewerChat[]
+  assetLibrary?: ChatAsset[]
   settings: ViewerSettings
   readingPositions?: Record<string, number>
   homeBanner?: string

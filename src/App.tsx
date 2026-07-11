@@ -64,7 +64,6 @@ import {
   downloadDriveBackup,
   downloadDriveFileAsDataUrl,
   downloadDriveFileAsBlob,
-  downloadDriveFileAsObjectUrl,
   downloadDriveText,
   forgetGoogleDriveToken,
   listDriveBackups,
@@ -107,7 +106,6 @@ const driveStateKey = 'st-chat-viewer:googleDrive'
 
 const defaultGoogleDriveState: GoogleDriveState = {
   connected: false,
-  imageImportMode: 'local',
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -126,8 +124,6 @@ function loadGoogleDriveState(): GoogleDriveState {
       ...defaultGoogleDriveState,
       ...parsed,
       connected: false,
-      imageImportMode:
-        parsed.imageImportMode === 'drive' ? 'drive' : 'local',
     }
   } catch {
     return defaultGoogleDriveState
@@ -161,10 +157,6 @@ function sameChatOrder(chats: ViewerChat[]) {
   return [...chats].sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
-function normalizeCharacterName(value?: string) {
-  return value?.trim().toLocaleLowerCase() ?? ''
-}
-
 function normalizeWordMaskRules(rules?: WordMaskRule[]) {
   return (rules ?? []).map((rule) => ({
     id: rule.id || makeId('mask'),
@@ -173,11 +165,23 @@ function normalizeWordMaskRules(rules?: WordMaskRule[]) {
   }))
 }
 
+function normalizeAsset(asset: ChatAsset): ChatAsset {
+  return {
+    ...asset,
+    id: asset.id || makeId('asset'),
+    filename: asset.filename || 'image',
+    type: asset.type || 'image/*',
+    dataUrl: asset.dataUrl ?? '',
+    addedAt: asset.addedAt || new Date().toISOString(),
+  }
+}
+
 function normalizeChat(chat: ViewerChat): ViewerChat {
   return {
     ...chat,
     folder: chat.folder ?? '',
-    assets: chat.assets ?? [],
+    assets: (chat.assets ?? []).map(normalizeAsset),
+    assetIds: chat.assetIds ?? [],
     notes: chat.notes ?? [],
     highlights: chat.highlights ?? [],
     wordMaskEnabled: chat.wordMaskEnabled ?? false,
@@ -266,7 +270,6 @@ function App() {
   const selectionScanTimerRef = useRef<number | null>(null)
   const searchFlashTimerRef = useRef<number | null>(null)
   const readingSaveTimerRef = useRef<number | null>(null)
-  const driveAssetObjectUrlsRef = useRef<Record<string, string>>({})
   const openedChatRef = useRef<string>(undefined)
   const prependAnchorRef = useRef<number | null>(null)
   const [chats, setChats] = useState<ViewerChat[]>([])
@@ -276,6 +279,7 @@ function App() {
   const [driveModalOpen, setDriveModalOpen] = useState(false)
   const [importChoiceOpen, setImportChoiceOpen] = useState(false)
   const [backupChoiceOpen, setBackupChoiceOpen] = useState(false)
+  const [assetGalleryOpen, setAssetGalleryOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [notesModalOpen, setNotesModalOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -302,7 +306,7 @@ function App() {
     },
   )
   const [homeQuery, setHomeQuery] = useState('')
-  const [shareAssetsByCharacter, setShareAssetsByCharacter] = useState(false)
+  const [assetLibrary, setAssetLibrary] = useState<ChatAsset[]>([])
   const [searchFlash, setSearchFlash] = useState<MessageHighlight>()
   const [readingPositions, setReadingPositions] = useState<Record<string, number>>(
     () => loadReadingPositions(),
@@ -320,7 +324,7 @@ function App() {
   const [driveBusy, setDriveBusy] = useState(false)
   const [remoteBackup, setRemoteBackup] = useState<DriveBackupFile | null>(null)
   const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([])
-  const [driveAssetUrls, setDriveAssetUrls] = useState<Record<string, string>>({})
+  const [driveBackupsLoaded, setDriveBackupsLoaded] = useState(false)
 
   useEffect(() => {
     getChats().then((items) => {
@@ -348,6 +352,9 @@ function App() {
     })
     void getMeta<string>('homeLogo').then((value) => {
       if (value) setHomeLogo(value)
+    })
+    void getMeta<ChatAsset[]>('assetLibrary').then((value) => {
+      setAssetLibrary((value ?? []).map(normalizeAsset))
     })
   }, [])
 
@@ -393,6 +400,7 @@ function App() {
       readingPositions,
       homeBanner,
       homeLogo,
+      assetLibrary,
     }),
     [
       chats,
@@ -400,6 +408,7 @@ function App() {
       readingPositions,
       homeBanner,
       homeLogo,
+      assetLibrary,
       driveState.lastLocalRevisionAt,
     ],
   )
@@ -412,9 +421,6 @@ function App() {
       if (selectionScanTimerRef.current) {
         window.clearTimeout(selectionScanTimerRef.current)
       }
-      Object.values(driveAssetObjectUrlsRef.current).forEach((url) =>
-        URL.revokeObjectURL(url),
-      )
     },
     [],
   )
@@ -449,27 +455,27 @@ function App() {
     () => chats.find((chat) => chat.id === selectedId),
     [chats, selectedId],
   )
+  const assetLibraryMap = useMemo(
+    () => new Map(assetLibrary.map((asset) => [asset.id, asset])),
+    [assetLibrary],
+  )
   const displaySelectedChat = useMemo(() => {
     if (!selectedChat) return undefined
+    const linkedAssets = (selectedChat.assetIds ?? [])
+      .map((id) => assetLibraryMap.get(id))
+      .filter((asset): asset is ChatAsset => Boolean(asset))
     return {
       ...selectedChat,
-      assets: selectedChat.assets.map((asset) =>
-        asset.storage === 'drive'
-          ? { ...asset, dataUrl: driveAssetUrls[asset.id] ?? '' }
-          : asset,
-      ),
+      assets: [
+        ...selectedChat.assets.filter(
+          (asset) => asset.storage !== 'drive' || Boolean(asset.dataUrl),
+        ),
+        ...linkedAssets,
+      ],
     }
-  }, [driveAssetUrls, selectedChat])
-  const selectedCharacterKey = normalizeCharacterName(selectedChat?.characterName)
-  const sameCharacterChatCount = useMemo(
-    () =>
-      selectedCharacterKey
-        ? chats.filter(
-            (chat) => normalizeCharacterName(chat.characterName) === selectedCharacterKey,
-          ).length
-        : 0,
-    [chats, selectedCharacterKey],
-  )
+  }, [assetLibraryMap, selectedChat])
+  const selectedAssetIds = selectedChat?.assetIds ?? []
+  const currentAssets = displaySelectedChat?.assets ?? []
 
   const folderOptions = useMemo(
     () =>
@@ -495,45 +501,6 @@ function App() {
       ? messages
       : messages.filter((message) => !message.hiddenByST)
   }, [selectedChat, settings.includeHidden])
-
-  useEffect(() => {
-    if (!selectedChat || !driveState.connected) return
-    const driveAssets = selectedChat.assets.filter(
-      (asset) =>
-        asset.storage === 'drive' &&
-        asset.driveFileId &&
-        !driveAssetObjectUrlsRef.current[asset.id],
-    )
-    if (!driveAssets.length) return
-
-    let cancelled = false
-    void (async () => {
-      try {
-        await requestGoogleDriveToken()
-        const entries = await Promise.all(
-          driveAssets.map(async (asset) => [
-            asset.id,
-            await downloadDriveFileAsObjectUrl(asset.driveFileId as string),
-          ] as const),
-        )
-        if (cancelled) {
-          entries.forEach(([, url]) => URL.revokeObjectURL(url))
-          return
-        }
-        driveAssetObjectUrlsRef.current = {
-          ...driveAssetObjectUrlsRef.current,
-          ...Object.fromEntries(entries),
-        }
-        setDriveAssetUrls({ ...driveAssetObjectUrlsRef.current })
-      } catch {
-        setNotice('Drive 이미지를 불러오지 못했습니다. Google Drive 연결을 확인해 주세요.')
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [driveState.connected, selectedChat])
 
   const searchResults = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
@@ -651,12 +618,6 @@ function App() {
       setReaderTopbarVisible(true)
     }
   }, [view, selectedChat?.id, settings.autoHideTopbar])
-
-  useEffect(() => {
-    if (!selectedCharacterKey && shareAssetsByCharacter) {
-      setShareAssetsByCharacter(false)
-    }
-  }, [selectedCharacterKey, shareAssetsByCharacter])
 
   const markImportantChange = useCallback(() => {
     const now = new Date().toISOString()
@@ -994,9 +955,33 @@ function App() {
     await updateChat({ ...chat, favorite: !chat.favorite })
   }
 
+  const linkAssetIdsToSelectedChat = async (assetIds: string[]) => {
+    if (!selectedChat || !assetIds.length) return
+    const nextIds = [...new Set([...(selectedChat.assetIds ?? []), ...assetIds])]
+    await updateChat({ ...selectedChat, assetIds: nextIds })
+  }
+
+  const registerAssetsToLibrary = async (assets: ChatAsset[]) => {
+    if (!selectedChat || !assets.length) return
+    const libraryAssets = assets.map((asset) =>
+      normalizeAsset({
+        ...asset,
+        id: makeId('asset'),
+        storage: 'local',
+        driveFileId: undefined,
+      }),
+    )
+    const nextLibrary = [...assetLibrary, ...libraryAssets]
+    setAssetLibrary(nextLibrary)
+    await setMeta('assetLibrary', nextLibrary)
+    await linkAssetIdsToSelectedChat(libraryAssets.map((asset) => asset.id))
+    setNotice(`${libraryAssets.length}개 에셋을 챗서랍에 저장하고 이 채팅에 연결했습니다.`)
+  }
+
   const importAssets = async (files: FileList | null) => {
     if (!files?.length || !selectedChat) return
     const assets: ChatAsset[] = []
+    const now = new Date().toISOString()
     for (const file of Array.from(files)) {
       if (file.name.toLocaleLowerCase().endsWith('.zip')) {
         const { default: JSZip } = await import('jszip')
@@ -1012,7 +997,7 @@ function App() {
             filename: imageFile.name,
             type: imageFile.type,
             dataUrl: await readFileAsDataUrl(imageFile),
-            addedAt: new Date().toISOString(),
+            addedAt: now,
           })
         }
         continue
@@ -1024,49 +1009,11 @@ function App() {
           filename: file.name,
           type: file.type,
           dataUrl: await readFileAsDataUrl(file),
-          addedAt: new Date().toISOString(),
+          addedAt: now,
         })
       }
     }
-    if (!assets.length) return
-    if (shareAssetsByCharacter && selectedCharacterKey) {
-      const targetIds = new Set(
-        chats
-          .filter(
-            (chat) => normalizeCharacterName(chat.characterName) === selectedCharacterKey,
-          )
-          .map((chat) => chat.id),
-      )
-      const updatedTargets: ViewerChat[] = []
-      const now = new Date().toISOString()
-      const nextChats = sameChatOrder(
-        chats.map((chat) => {
-          if (!targetIds.has(chat.id)) return chat
-          const copiedAssets = assets.map((asset) => ({
-            ...asset,
-            id: makeId('asset'),
-            addedAt: now,
-          }))
-          const updated = normalizeChat({
-            ...chat,
-            assets: [...chat.assets, ...copiedAssets],
-            updatedAt: now,
-          })
-          updatedTargets.push(updated)
-          return updated
-        }),
-      )
-      setChats(nextChats)
-      await saveChats(updatedTargets)
-      setNotice(
-        updatedTargets.length > 1
-          ? `${assets.length}개 이미지를 같은 캐릭터의 ${updatedTargets.length}개 채팅에 연결했습니다.`
-          : `${assets.length}개 이미지를 이 채팅에 연결했습니다.`,
-      )
-    } else {
-      await updateChat({ ...selectedChat, assets: [...selectedChat.assets, ...assets] })
-      setNotice(`${assets.length}개 이미지를 이 채팅에 연결했습니다.`)
-    }
+    await registerAssetsToLibrary(assets)
     if (assetInputRef.current) assetInputRef.current.value = ''
   }
 
@@ -1187,8 +1134,10 @@ function App() {
       throw new Error('챗서랍 백업 파일이 아닙니다.')
     }
     const restoredChats = sameChatOrder(backup.chats.map(normalizeChat))
+    const restoredAssets = (backup.assetLibrary ?? []).map(normalizeAsset)
     await replaceChats(restoredChats)
     setChats(restoredChats)
+    setAssetLibrary(restoredAssets)
     setSettings(normalizedSettings(backup.settings ?? defaultSettings))
     setReadingPositions(backup.readingPositions ?? {})
     setHomeBanner(backup.homeBanner)
@@ -1197,6 +1146,8 @@ function App() {
     else await deleteMeta('homeBanner')
     if (backup.homeLogo) await setMeta('homeLogo', backup.homeLogo)
     else await deleteMeta('homeLogo')
+    if (restoredAssets.length) await setMeta('assetLibrary', restoredAssets)
+    else await deleteMeta('assetLibrary')
     openedChatRef.current = undefined
     setSelectedId(restoredChats[0]?.id)
     setRemoteBackup(null)
@@ -1235,6 +1186,7 @@ function App() {
   const checkDriveBackupFreshness = async () => {
     const backups = await listDriveBackups()
     setDriveBackups(backups)
+    setDriveBackupsLoaded(true)
     const latest = backups[0]
     if (!latest) {
       setRemoteBackup(null)
@@ -1259,10 +1211,11 @@ function App() {
 
   const connectGoogleDrive = async () => {
     setDriveBusy(true)
+    setDriveBackupsLoaded(false)
     try {
       await requestGoogleDriveToken({ forcePrompt: true })
-      setDriveState((current) => ({ ...current, connected: true }))
       await checkDriveBackupFreshness()
+      setDriveState((current) => ({ ...current, connected: true }))
       setNotice('Google Drive를 연결했습니다.')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Google Drive 연결 실패')
@@ -1274,6 +1227,7 @@ function App() {
   const disconnectGoogleDrive = () => {
     forgetGoogleDriveToken()
     setRemoteBackup(null)
+    setDriveBackupsLoaded(false)
     setDriveState((current) => ({
       ...current,
       connected: false,
@@ -1292,6 +1246,7 @@ function App() {
       const uploaded = await uploadDriveBackup(backup)
       const backups = await listDriveBackups()
       setDriveBackups(backups)
+      setDriveBackupsLoaded(true)
       setRemoteBackup(null)
       setDriveState((current) => ({
         ...current,
@@ -1316,6 +1271,7 @@ function App() {
       await requestGoogleDriveToken()
       const backups = driveBackups.length ? driveBackups : await listDriveBackups()
       setDriveBackups(backups)
+      setDriveBackupsLoaded(true)
       const target = file ?? remoteBackup ?? backups[0]
       if (!target) throw new Error('복원할 Google Drive 백업이 없습니다.')
       const backup = await downloadDriveBackup(target.id)
@@ -1378,50 +1334,6 @@ function App() {
     }
   }
 
-  const attachAssetsToSelectedChat = async (assets: ChatAsset[]) => {
-    if (!selectedChat || !assets.length) return
-    if (shareAssetsByCharacter && selectedCharacterKey) {
-      const targetIds = new Set(
-        chats
-          .filter(
-            (chat) => normalizeCharacterName(chat.characterName) === selectedCharacterKey,
-          )
-          .map((chat) => chat.id),
-      )
-      const updatedTargets: ViewerChat[] = []
-      const now = new Date().toISOString()
-      const nextChats = sameChatOrder(
-        chats.map((chat) => {
-          if (!targetIds.has(chat.id)) return chat
-          const copiedAssets = assets.map((asset) => ({
-            ...asset,
-            id: makeId('asset'),
-            addedAt: now,
-          }))
-          const updated = normalizeChat({
-            ...chat,
-            assets: [...chat.assets, ...copiedAssets],
-            updatedAt: now,
-          })
-          updatedTargets.push(updated)
-          return updated
-        }),
-      )
-      markImportantChange()
-      setChats(nextChats)
-      await saveChats(updatedTargets)
-      setNotice(
-        updatedTargets.length > 1
-          ? `${assets.length}개 이미지를 같은 캐릭터의 ${updatedTargets.length}개 채팅에 연결했습니다.`
-          : `${assets.length}개 이미지를 이 채팅에 연결했습니다.`,
-      )
-      return
-    }
-
-    await updateChat({ ...selectedChat, assets: [...selectedChat.assets, ...assets] })
-    setNotice(`${assets.length}개 이미지를 이 채팅에 연결했습니다.`)
-  }
-
   const importDriveAssets = async () => {
     if (!selectedChat) return
     setDriveBusy(true)
@@ -1467,33 +1379,66 @@ function App() {
           /\.(png|jpe?g|gif|webp|avif)$/i.test(file.name)
         if (!isImage) continue
 
-        if (driveState.imageImportMode === 'drive') {
-          assets.push({
-            id: makeId('asset'),
-            filename: file.name,
-            type: file.mimeType ?? 'image/*',
-            dataUrl: '',
-            storage: 'drive',
-            driveFileId: file.id,
-            addedAt: now,
-          })
-        } else {
-          assets.push({
-            id: makeId('asset'),
-            filename: file.name,
-            type: file.mimeType ?? 'image/*',
-            dataUrl: await downloadDriveFileAsDataUrl(file),
-            storage: 'local',
-            addedAt: now,
-          })
-        }
+        assets.push({
+          id: makeId('asset'),
+          filename: file.name,
+          type: file.mimeType ?? 'image/*',
+          dataUrl: await downloadDriveFileAsDataUrl(file),
+          storage: 'local',
+          addedAt: now,
+        })
       }
-      await attachAssetsToSelectedChat(assets)
+      await registerAssetsToLibrary(assets)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Drive 에셋 가져오기 실패')
     } finally {
       setDriveBusy(false)
     }
+  }
+
+  const unlinkAssetFromSelectedChat = async (asset: ChatAsset) => {
+    if (!selectedChat) return
+    const isLibraryAsset = selectedChat.assetIds?.includes(asset.id)
+    if (isLibraryAsset) {
+      await updateChat({
+        ...selectedChat,
+        assetIds: (selectedChat.assetIds ?? []).filter((id) => id !== asset.id),
+      })
+      setNotice('이 채팅에서 에셋 연결을 해제했습니다.')
+      return
+    }
+
+    await updateChat({
+      ...selectedChat,
+      assets: selectedChat.assets.filter((item) => item.id !== asset.id),
+    })
+    setNotice('이 채팅에서 에셋을 제거했습니다.')
+  }
+
+  const deleteLibraryAsset = async (assetId: string) => {
+    const nextLibrary = assetLibrary.filter((asset) => asset.id !== assetId)
+    const updatedChats = chats
+      .filter((chat) => chat.assetIds?.includes(assetId))
+      .map((chat) => ({
+        ...chat,
+        assetIds: (chat.assetIds ?? []).filter((id) => id !== assetId),
+        updatedAt: new Date().toISOString(),
+      }))
+
+    markImportantChange()
+    setAssetLibrary(nextLibrary)
+    await setMeta('assetLibrary', nextLibrary)
+
+    if (updatedChats.length) {
+      const updatedMap = new Map(updatedChats.map((chat) => [chat.id, chat]))
+      setChats((current) =>
+        sameChatOrder(
+          current.map((chat) => updatedMap.get(chat.id) ?? chat),
+        ),
+      )
+      await saveChats(updatedChats)
+    }
+    setNotice('챗서랍 에셋을 삭제했습니다.')
   }
 
   const resetSettings = () => {
@@ -1524,8 +1469,10 @@ function App() {
     saveReadingPositions({})
     await deleteMeta('homeBanner')
     await deleteMeta('homeLogo')
+    await deleteMeta('assetLibrary')
     setHomeBanner(undefined)
     setHomeLogo(undefined)
+    setAssetLibrary([])
     setChats([])
     setReadingPositions({})
     setSettings(defaultSettings)
@@ -2306,45 +2253,6 @@ function App() {
                   <ImageUp size={16} />
                   유저 아바타 등록
                 </button>
-                <button type="button" onClick={() => assetInputRef.current?.click()}>
-                  <Image size={16} />
-                  이미지 에셋 (Zip) 등록
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void importDriveAssets()}
-                  disabled={!driveState.connected || driveBusy}
-                  title={
-                    driveState.connected
-                      ? 'Google Drive에서 이미지 선택'
-                      : 'Google Drive 연결 후 사용할 수 있습니다.'
-                  }
-                >
-                  <Cloud size={16} />
-                  Drive 에셋 등록
-                </button>
-                <label
-                  className={
-                    selectedCharacterKey
-                      ? 'check-row asset-share-check'
-                      : 'check-row asset-share-check is-disabled'
-                  }
-                  title={
-                    selectedCharacterKey
-                      ? `${sameCharacterChatCount}개 채팅에 적용 가능`
-                      : '캐릭터 이름이 있는 채팅에서 사용할 수 있습니다.'
-                  }
-                >
-                  <input
-                    type="checkbox"
-                    checked={shareAssetsByCharacter}
-                    disabled={!selectedCharacterKey}
-                    onChange={(event) =>
-                      setShareAssetsByCharacter(event.currentTarget.checked)
-                    }
-                  />
-                  <span>동일한 이름의 캐릭터 전부 공통으로 에셋 적용</span>
-                </label>
                 <button type="button" onClick={() => void removeSelectedChat()}>
                   <Trash2 size={16} />
                   채팅 삭제
@@ -2354,10 +2262,71 @@ function App() {
                 <summary>원본 파일 정보</summary>
                 <p>{selectedChat.sourceFileName}</p>
               </details>
-              <p className="muted">
-                이미지 자료 {selectedChat.assets.length}개 · {'{{img::파일명}}'} 치환
-                지원
-              </p>
+            </>
+          ) : (
+            <p className="muted">선택된 채팅이 없습니다.</p>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>
+            <Image size={16} />
+            이미지 에셋
+          </h2>
+          {selectedChat ? (
+            <>
+              <div className="stacked-buttons">
+                <button type="button" onClick={() => assetInputRef.current?.click()}>
+                  <Image size={16} />
+                  기기에서 등록
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void importDriveAssets()}
+                  disabled={!driveState.connected || driveBusy}
+                  title={
+                    driveState.connected
+                      ? 'Google Drive에서 이미지 또는 zip을 선택합니다.'
+                      : 'Google Drive 연결 후 사용할 수 있습니다.'
+                  }
+                >
+                  <Cloud size={16} />
+                  Drive에서 등록
+                </button>
+                <button type="button" onClick={() => setAssetGalleryOpen(true)}>
+                  <BookOpen size={16} />
+                  챗서랍에서 연동
+                </button>
+              </div>
+              <div className="asset-list">
+                <span className="asset-list-title">
+                  현재 채팅에 연결된 에셋 목록
+                </span>
+                {currentAssets.length ? (
+                  currentAssets.map((asset) => (
+                    <div className="asset-row" key={asset.id}>
+                      {asset.dataUrl ? (
+                        <img src={asset.dataUrl} alt="" />
+                      ) : (
+                        <span className="asset-thumb-empty">
+                          <Image size={14} />
+                        </span>
+                      )}
+                      <span title={asset.filename}>{asset.filename}</span>
+                      <button
+                        type="button"
+                        title="에셋 연결 해제"
+                        onClick={() => void unlinkAssetFromSelectedChat(asset)}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">연결된 이미지 에셋이 없습니다.</p>
+                )}
+              </div>
+              <p className="muted">{'{{img::파일명}}'} 치환 지원</p>
             </>
           ) : (
             <p className="muted">선택된 채팅이 없습니다.</p>
@@ -2532,16 +2501,27 @@ function App() {
         />
       )}
 
+      {assetGalleryOpen && selectedChat && (
+        <AssetGalleryModal
+          assets={assetLibrary}
+          linkedIds={selectedAssetIds}
+          onClose={() => setAssetGalleryOpen(false)}
+          onLink={(assetIds) => {
+            setAssetGalleryOpen(false)
+            void linkAssetIdsToSelectedChat(assetIds)
+          }}
+          onDelete={(assetId) => void deleteLibraryAsset(assetId)}
+        />
+      )}
+
       {driveModalOpen && (
         <DriveModal
           driveState={driveState}
           driveBusy={driveBusy}
           remoteBackup={remoteBackup}
           driveBackups={driveBackups}
+          driveBackupsLoaded={driveBackupsLoaded}
           onClose={() => setDriveModalOpen(false)}
-          onDriveStateChange={(patch) =>
-            setDriveState((current) => ({ ...current, ...patch }))
-          }
           onDriveConnect={() => void connectGoogleDrive()}
           onDriveDisconnect={disconnectGoogleDrive}
           onDriveBackupNow={() => void saveDriveBackup()}
@@ -3516,7 +3496,7 @@ function GoogleDrivePanel({
   driveBusy,
   remoteBackup,
   driveBackups,
-  onDriveStateChange,
+  driveBackupsLoaded,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
@@ -3527,7 +3507,7 @@ function GoogleDrivePanel({
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
   driveBackups: DriveBackupFile[]
-  onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
+  driveBackupsLoaded: boolean
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
@@ -3535,6 +3515,13 @@ function GoogleDrivePanel({
   onDriveDismissRemote: () => void
 }) {
   const latestBackup = driveBackups[0]
+  const backupLabel = !driveState.connected
+    ? '연결 후 확인'
+    : !driveBackupsLoaded
+      ? '확인 중'
+      : latestBackup
+        ? `${formatDate(latestBackup.modifiedTime)} · ${driveBackups.length}개`
+        : '백업 없음'
 
   return (
     <section className="panel drive-panel">
@@ -3550,21 +3537,26 @@ function GoogleDrivePanel({
       </p>
 
       <div className="drive-summary">
-        <div>
-          <span>연결 상태</span>
-          <strong>{driveState.connected ? '연결됨' : '연결 안 됨'}</strong>
+        <div className="drive-status-card">
+          <span>
+            <span>연결 상태</span>
+            <strong>{driveState.connected ? '연결됨' : '연결 안 됨'}</strong>
+          </span>
+          {driveState.connected ? (
+            <button type="button" onClick={onDriveDisconnect} disabled={driveBusy}>
+              <X size={15} />
+              연결 해제
+            </button>
+          ) : (
+            <button type="button" onClick={onDriveConnect} disabled={driveBusy}>
+              <Cloud size={15} />
+              Google Drive 연결
+            </button>
+          )}
         </div>
         <div>
           <span>Drive 백업</span>
-          <strong>
-            {driveState.connected
-              ? latestBackup
-                ? `${formatDate(latestBackup.modifiedTime)} · ${driveBackups.length}개`
-                : '백업 없음'
-              : driveState.lastBackupAt
-                ? `${formatDate(driveState.lastBackupAt)} 기록`
-                : '연결 후 확인'}
-          </strong>
+          <strong>{backupLabel}</strong>
         </div>
       </div>
 
@@ -3589,17 +3581,6 @@ function GoogleDrivePanel({
       )}
 
       <div className="drive-actions">
-        {driveState.connected ? (
-          <button type="button" onClick={onDriveDisconnect} disabled={driveBusy}>
-            <X size={16} />
-            연결 해제
-          </button>
-        ) : (
-          <button type="button" onClick={onDriveConnect} disabled={driveBusy}>
-            <Cloud size={16} />
-            Google Drive 연결
-          </button>
-        )}
         <button
           type="button"
           onClick={onDriveBackupNow}
@@ -3617,29 +3598,6 @@ function GoogleDrivePanel({
           Drive 백업 복원
         </button>
       </div>
-
-      <label>
-        이미지 저장 방식
-        <select
-          value={driveState.imageImportMode}
-          onChange={(event) =>
-            onDriveStateChange({
-              imageImportMode:
-                event.currentTarget.value === 'drive' ? 'drive' : 'local',
-            })
-          }
-        >
-          <option value="local">브라우저에 복사</option>
-          <option value="drive">Drive에서 불러오기</option>
-        </select>
-      </label>
-      <p className="setting-note">
-        브라우저에 복사: 새로고침/오프라인에도 안정적, 대신 브라우저 저장공간
-        사용
-        <br />
-        Drive에서 불러오기: 브라우저 저장공간은 적게 쓰지만, 접속 시마다 Google
-        Drive 연결 필요
-      </p>
 
       <p className="setting-note">
         개인정보처리방침:{' '}
@@ -3752,13 +3710,124 @@ function BackupChoiceModal({
   )
 }
 
+function AssetGalleryModal({
+  assets,
+  linkedIds,
+  onClose,
+  onLink,
+  onDelete,
+}: {
+  assets: ChatAsset[]
+  linkedIds: string[]
+  onClose: () => void
+  onLink: (assetIds: string[]) => void
+  onDelete: (assetId: string) => void
+}) {
+  const linkedSet = useMemo(() => new Set(linkedIds), [linkedIds])
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const selectableAssets = assets.filter((asset) => !linkedSet.has(asset.id))
+
+  const toggleAsset = (assetId: string) => {
+    setSelectedIds((current) =>
+      current.includes(assetId)
+        ? current.filter((id) => id !== assetId)
+        : [...current, assetId],
+    )
+  }
+
+  return (
+    <div className="modal-backdrop compact-backdrop" role="presentation">
+      <section
+        className="settings-modal asset-gallery-modal"
+        role="dialog"
+        aria-modal="true"
+      >
+        <header className="modal-head">
+          <div>
+            <span className="eyebrow">ASSETS</span>
+            <h2>챗서랍에서 연동</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        {assets.length ? (
+          <div className="asset-gallery-grid">
+            {assets.map((asset) => {
+              const linked = linkedSet.has(asset.id)
+              const selected = selectedSet.has(asset.id)
+              return (
+                <div
+                  className={
+                    selected
+                      ? 'asset-gallery-card selected'
+                      : linked
+                        ? 'asset-gallery-card linked'
+                        : 'asset-gallery-card'
+                  }
+                  key={asset.id}
+                >
+                  <button
+                    type="button"
+                    className="asset-gallery-main"
+                    disabled={linked}
+                    onClick={() => toggleAsset(asset.id)}
+                  >
+                    {asset.dataUrl ? (
+                      <img src={asset.dataUrl} alt="" />
+                    ) : (
+                      <span className="asset-thumb-empty">
+                        <Image size={18} />
+                      </span>
+                    )}
+                    <span title={asset.filename}>{asset.filename}</span>
+                    <small>{linked ? '연동됨' : selected ? '선택됨' : '선택'}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="asset-gallery-delete"
+                    title="삭제"
+                    onClick={() => {
+                      setSelectedIds((current) =>
+                        current.filter((id) => id !== asset.id),
+                      )
+                      onDelete(asset.id)
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="muted">아직 저장된 이미지 에셋이 없습니다.</p>
+        )}
+        <div className="modal-actions">
+          <button
+            type="button"
+            onClick={() =>
+              onLink(selectedIds.filter((id) => assets.some((asset) => asset.id === id)))
+            }
+            disabled={!selectedIds.length || !selectableAssets.length}
+          >
+            <Check size={16} />
+            선택한 에셋 연동
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function DriveModal({
   driveState,
   driveBusy,
   remoteBackup,
   driveBackups,
+  driveBackupsLoaded,
   onClose,
-  onDriveStateChange,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
@@ -3769,8 +3838,8 @@ function DriveModal({
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
   driveBackups: DriveBackupFile[]
+  driveBackupsLoaded: boolean
   onClose: () => void
-  onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
@@ -3794,7 +3863,7 @@ function DriveModal({
           driveBusy={driveBusy}
           remoteBackup={remoteBackup}
           driveBackups={driveBackups}
-          onDriveStateChange={onDriveStateChange}
+          driveBackupsLoaded={driveBackupsLoaded}
           onDriveConnect={onDriveConnect}
           onDriveDisconnect={onDriveDisconnect}
           onDriveBackupNow={onDriveBackupNow}
