@@ -10,8 +10,6 @@ export type CoverImageMode = 'grayscale' | 'dark' | 'blur' | 'original'
 
 export type DriveImageMode = 'local' | 'drive'
 
-export type DriveAutoBackupInterval = 5 | 10 | 30 | 60
-
 export interface ThemePalette {
   bg: string
   surface: string
@@ -201,8 +199,6 @@ export interface ViewerSettings {
 
 export interface GoogleDriveState {
   connected: boolean
-  autoBackupEnabled: boolean
-  autoBackupIntervalMinutes: DriveAutoBackupInterval
   imageImportMode: DriveImageMode
   lastBackupAt?: string
   lastBackupFileId?: string

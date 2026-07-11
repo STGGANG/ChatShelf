@@ -9,8 +9,6 @@ export const googleDriveConfig = {
   backupFolderName: 'ChatShelf Backups',
 }
 
-export type DriveFileKind = 'jsonl' | 'backup' | 'image'
-
 export interface DrivePickedFile {
   id: string
   name: string
@@ -66,7 +64,6 @@ interface GoogleDriveWindow extends Window {
       }
       ViewId: {
         DOCS: string
-        DOCS_IMAGES: string
       }
     }
   }
@@ -368,12 +365,16 @@ export async function downloadDriveFileAsDataUrl(file: DrivePickedFile) {
   })
 }
 
+export async function downloadDriveFileAsBlob(fileId: string) {
+  return driveBlob(`/files/${fileId}?alt=media`)
+}
+
 export async function downloadDriveFileAsObjectUrl(fileId: string) {
   const blob = await driveBlob(`/files/${fileId}?alt=media`)
   return URL.createObjectURL(blob)
 }
 
-export async function pickDriveFiles(kind: DriveFileKind, options?: { multiple?: boolean }) {
+export async function pickDriveFiles(options?: { multiple?: boolean }) {
   await ensurePicker()
   const api = window as GoogleDriveWindow
   const picker = api.google?.picker
@@ -381,13 +382,7 @@ export async function pickDriveFiles(kind: DriveFileKind, options?: { multiple?:
   const token = await getGoogleDriveToken()
 
   return new Promise<DrivePickedFile[]>((resolve, reject) => {
-    const view =
-      kind === 'image'
-        ? new picker.DocsView(picker.ViewId.DOCS_IMAGES)
-        : new picker.DocsView(picker.ViewId.DOCS)
-    if (kind === 'backup') {
-      view.setMimeTypes('application/json,text/plain')
-    }
+    const view = new picker.DocsView(picker.ViewId.DOCS)
     view.setIncludeFolders(true)
     view.setSelectFolderEnabled(false)
 

@@ -1602,7 +1602,7 @@ input[type='checkbox']:focus-visible {
   inset: 0;
   z-index: 150;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   padding: clamp(1rem, 4vw, 3rem) 1rem;
   background: rgba(20, 18, 16, 0.42);
@@ -1617,6 +1617,8 @@ input[type='checkbox']:focus-visible {
   border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
   padding: 1.5rem;
+  max-height: calc(100svh - 2rem);
+  overflow-y: auto;
   animation: modal-in var(--t) both;
 }
 @keyframes modal-in {
@@ -1738,20 +1740,6 @@ input[type='checkbox']:focus-visible {
 .drive-panel a {
   color: var(--accent);
   text-underline-offset: 3px;
-}
-.beta-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0.2rem 0.45rem;
-  border-radius: var(--r-pill);
-  border: 1px solid color-mix(in srgb, #e0a24a 40%, var(--line));
-  background: color-mix(in srgb, #f6c76f 22%, var(--surface));
-  color: color-mix(in srgb, #9c6a22 82%, var(--ink));
-  font-size: 0.68rem;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
 }
 .drive-alert {
   display: grid;
