@@ -282,6 +282,8 @@ function App() {
   const [selectedId, setSelectedId] = useState<string>()
   const [settings, setSettings] = useState<ViewerSettings>(() => loadSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [driveModalOpen, setDriveModalOpen] = useState(false)
+  const [importChoiceOpen, setImportChoiceOpen] = useState(false)
   const [highlightModalOpen, setHighlightModalOpen] = useState(false)
   const [notesModalOpen, setNotesModalOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -325,6 +327,7 @@ function App() {
   )
   const [driveBusy, setDriveBusy] = useState(false)
   const [remoteBackup, setRemoteBackup] = useState<DriveBackupFile | null>(null)
+  const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([])
   const [driveAssetUrls, setDriveAssetUrls] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -1273,6 +1276,7 @@ function App() {
 
   const checkDriveBackupFreshness = async () => {
     const backups = await listDriveBackups()
+    setDriveBackups(backups)
     const latest = backups[0]
     if (!latest) {
       setRemoteBackup(null)
@@ -1345,6 +1349,8 @@ function App() {
       await requestGoogleDriveToken()
       const backup = buildBackup(revisionAt)
       const uploaded = await uploadDriveBackup(backup)
+      const backups = await listDriveBackups()
+      setDriveBackups(backups)
       setRemoteBackup(null)
       setDriveState((current) => ({
         ...current,
@@ -1355,7 +1361,9 @@ function App() {
         lastLocalRevisionAt: revisionAt,
         lastBackupLocalRevisionAt: revisionAt,
       }))
-      if (mode === 'manual') setNotice('Google Drive에 백업을 저장했습니다.')
+      if (mode === 'manual') {
+        setNotice(`Google Drive에 백업을 저장했습니다. (${uploaded.name})`)
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Google Drive 백업 실패')
     } finally {
@@ -1367,7 +1375,9 @@ function App() {
     setDriveBusy(true)
     try {
       await requestGoogleDriveToken()
-      const target = file ?? remoteBackup ?? (await listDriveBackups())[0]
+      const backups = driveBackups.length ? driveBackups : await listDriveBackups()
+      setDriveBackups(backups)
+      const target = file ?? remoteBackup ?? backups[0]
       if (!target) throw new Error('복원할 Google Drive 백업이 없습니다.')
       const backup = await downloadDriveBackup(target.id)
       await applyBackup(backup, { driveFile: target, markLocalChange: false })
@@ -1379,37 +1389,11 @@ function App() {
     }
   }
 
-  const pickDriveBackup = async () => {
-    setDriveBusy(true)
-    try {
-      await requestGoogleDriveToken()
-      const [picked] = await pickDriveFiles('backup')
-      if (!picked) return
-      const backup = await downloadDriveBackup(picked.id)
-      await applyBackup(
-        backup,
-        {
-          driveFile: {
-            id: picked.id,
-            name: picked.name,
-            createdTime: backup.exportedAt,
-            modifiedTime: backup.exportedAt,
-          },
-          markLocalChange: false,
-        },
-      )
-      setNotice('선택한 Drive 백업을 복원했습니다.')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Drive 백업 선택 실패')
-    } finally {
-      setDriveBusy(false)
-    }
-  }
-
   const importDriveJsonl = async () => {
     setDriveBusy(true)
     try {
       await requestGoogleDriveToken()
+      setDriveState((current) => ({ ...current, connected: true }))
       const picked = await pickDriveFiles('jsonl', { multiple: true })
       if (!picked.length) return
       const imported: ViewerChat[] = []
@@ -1504,6 +1488,7 @@ function App() {
     setDriveBusy(true)
     try {
       await requestGoogleDriveToken()
+      setDriveState((current) => ({ ...current, connected: true }))
       const picked = await pickDriveFiles('image', { multiple: true })
       if (!picked.length) return
       const now = new Date().toISOString()
@@ -1837,7 +1822,7 @@ function App() {
                 type="button"
                 className="btn-accent"
                 title="채팅 추가"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => setImportChoiceOpen(true)}
               >
                 <Plus size={16} />
                 <span className="btn-accent-label">채팅 추가</span>
@@ -1857,6 +1842,16 @@ function App() {
                 onClick={() => backupInputRef.current?.click()}
               >
                 <Import size={18} />
+              </button>
+              <button
+                type="button"
+                className={
+                  driveState.connected ? 'icon-button drive-home active' : 'icon-button drive-home'
+                }
+                title="Google Drive"
+                onClick={() => setDriveModalOpen(true)}
+              >
+                <Cloud size={18} />
               </button>
               {!homeBanner && (
                 <button
@@ -1894,7 +1889,7 @@ function App() {
                 <button
                   type="button"
                   className="btn-accent"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => setImportChoiceOpen(true)}
                 >
                   <Plus size={16} />
                   첫 채팅 불러오기
@@ -2529,13 +2524,42 @@ function App() {
         <SettingsModal
           settings={settings}
           homeLogo={homeLogo}
-          driveState={driveState}
-          driveBusy={driveBusy}
-          remoteBackup={remoteBackup}
           onHomeLogoPick={() => logoInputRef.current?.click()}
           onHomeLogoRemove={() => void removeHomeLogo()}
           onClose={() => setSettingsOpen(false)}
           onUpdate={updateSettings}
+          onResetSettings={resetSettings}
+          onResetAll={() => void resetEverything()}
+        />
+      )}
+
+      {importChoiceOpen && (
+        <ImportChoiceModal
+          driveConnected={driveState.connected}
+          driveBusy={driveBusy}
+          onClose={() => setImportChoiceOpen(false)}
+          onPickLocal={() => {
+            setImportChoiceOpen(false)
+            fileInputRef.current?.click()
+          }}
+          onPickDrive={() => {
+            setImportChoiceOpen(false)
+            void importDriveJsonl()
+          }}
+          onOpenDriveSettings={() => {
+            setImportChoiceOpen(false)
+            setDriveModalOpen(true)
+          }}
+        />
+      )}
+
+      {driveModalOpen && (
+        <DriveModal
+          driveState={driveState}
+          driveBusy={driveBusy}
+          remoteBackup={remoteBackup}
+          driveBackups={driveBackups}
+          onClose={() => setDriveModalOpen(false)}
           onDriveStateChange={(patch) =>
             setDriveState((current) => ({ ...current, ...patch }))
           }
@@ -2544,8 +2568,6 @@ function App() {
           onDriveBackupNow={() => void saveDriveBackup('manual')}
           onDriveCheckLatest={() => void checkLatestDriveBackup()}
           onDriveRestoreLatest={() => void restoreDriveBackup()}
-          onDrivePickBackup={() => void pickDriveBackup()}
-          onDriveImportJsonl={() => void importDriveJsonl()}
           onDriveDismissRemote={() => {
             if (!remoteBackup) return
             setDriveState((current) => ({
@@ -2555,8 +2577,6 @@ function App() {
             setRemoteBackup(null)
             setNotice('Drive 복원을 나중에 다시 확인할 수 있습니다.')
           }}
-          onResetSettings={resetSettings}
-          onResetAll={() => void resetEverything()}
         />
       )}
 
@@ -3517,38 +3537,38 @@ function GoogleDrivePanel({
   driveState,
   driveBusy,
   remoteBackup,
+  driveBackups,
   onDriveStateChange,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
   onDriveCheckLatest,
   onDriveRestoreLatest,
-  onDrivePickBackup,
-  onDriveImportJsonl,
   onDriveDismissRemote,
 }: {
   driveState: GoogleDriveState
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
+  driveBackups: DriveBackupFile[]
   onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
   onDriveCheckLatest: () => void
   onDriveRestoreLatest: () => void
-  onDrivePickBackup: () => void
-  onDriveImportJsonl: () => void
   onDriveDismissRemote: () => void
 }) {
   const hasBackupPending =
     Boolean(driveState.lastLocalRevisionAt) &&
     driveState.lastLocalRevisionAt !== driveState.lastBackupLocalRevisionAt
+  const latestBackup = driveBackups[0]
 
   return (
-    <section className="panel settings-wide settings-single drive-panel">
+    <section className="panel drive-panel">
       <h2>
         <Cloud size={16} />
         Google Drive
+        <span className="beta-badge">테스트 중으로 사용 X</span>
       </h2>
       <p className="setting-note">
         Google Drive를 연결하면 수동/자동 백업 저장 및 복원, Drive 내 파일
@@ -3558,13 +3578,32 @@ function GoogleDrivePanel({
         데이터 정리 시 초기화될 수 있습니다.
       </p>
 
+      <div className="drive-summary">
+        <div>
+          <span>연결 상태</span>
+          <strong>{driveState.connected ? '연결됨' : '연결 안 됨'}</strong>
+        </div>
+        <div>
+          <span>Drive 백업</span>
+          <strong>
+            {latestBackup
+              ? `${formatDate(latestBackup.modifiedTime)} · ${driveBackups.length}개`
+              : driveState.lastBackupAt
+                ? `${formatDate(driveState.lastBackupAt)}`
+                : '확인 전'}
+          </strong>
+        </div>
+      </div>
+
+      {driveBusy && <p className="drive-busy">Google Drive 작업 처리 중...</p>}
+
       {remoteBackup && (
         <div className="drive-alert">
           <div>
             <strong>Google Drive에 더 최신 백업이 있습니다.</strong>
             <span>최신 데이터로 복원을 권장합니다.</span>
           </div>
-          <div className="settings-button-row">
+          <div className="drive-actions drive-actions-pair">
             <button type="button" onClick={onDriveRestoreLatest} disabled={driveBusy}>
               <Import size={16} />
               복원하기
@@ -3576,11 +3615,11 @@ function GoogleDrivePanel({
         </div>
       )}
 
-      <div className="settings-button-row">
+      <div className="drive-actions">
         {driveState.connected ? (
           <button type="button" onClick={onDriveDisconnect} disabled={driveBusy}>
             <X size={16} />
-            Google Drive 연결 해제
+            연결 해제
           </button>
         ) : (
           <button type="button" onClick={onDriveConnect} disabled={driveBusy}>
@@ -3594,7 +3633,7 @@ function GoogleDrivePanel({
           disabled={driveBusy || !driveState.connected}
         >
           <RotateCcw size={16} />
-          최신 백업 확인
+          백업 확인
         </button>
         <button
           type="button"
@@ -3602,23 +3641,15 @@ function GoogleDrivePanel({
           disabled={driveBusy || !driveState.connected}
         >
           <Download size={16} />
-          Drive에 지금 백업
+          지금 백업
         </button>
         <button
           type="button"
-          onClick={onDrivePickBackup}
+          onClick={onDriveRestoreLatest}
           disabled={driveBusy || !driveState.connected}
         >
           <Import size={16} />
-          Drive 백업 불러오기
-        </button>
-        <button
-          type="button"
-          onClick={onDriveImportJsonl}
-          disabled={driveBusy || !driveState.connected}
-        >
-          <FileText size={16} />
-          Drive에서 .jsonl 가져오기
+          최신 복원
         </button>
       </div>
 
@@ -3695,46 +3726,138 @@ function GoogleDrivePanel({
   )
 }
 
-function SettingsModal({
-  settings,
-  homeLogo,
+function ImportChoiceModal({
+  driveConnected,
+  driveBusy,
+  onClose,
+  onPickLocal,
+  onPickDrive,
+  onOpenDriveSettings,
+}: {
+  driveConnected: boolean
+  driveBusy: boolean
+  onClose: () => void
+  onPickLocal: () => void
+  onPickDrive: () => void
+  onOpenDriveSettings: () => void
+}) {
+  return (
+    <div className="modal-backdrop compact-backdrop" role="presentation">
+      <section className="settings-modal choice-modal" role="dialog" aria-modal="true">
+        <header className="modal-head">
+          <div>
+            <span className="eyebrow">IMPORT</span>
+            <h2>채팅 추가</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="choice-actions">
+          <button type="button" onClick={onPickLocal}>
+            <FileText size={18} />
+            <span>
+              <strong>기기에서 선택</strong>
+              <small>.jsonl 파일을 직접 불러옵니다.</small>
+            </span>
+          </button>
+          <button type="button" onClick={onPickDrive} disabled={driveBusy}>
+            <Cloud size={18} />
+            <span>
+              <strong>Google Drive에서 선택</strong>
+              <small>
+                {driveConnected
+                  ? 'Drive 파일 선택 창을 엽니다.'
+                  : '처음 한 번 Google 권한 확인이 필요합니다.'}
+              </small>
+            </span>
+          </button>
+        </div>
+        <button
+          type="button"
+          className="choice-link"
+          onClick={onOpenDriveSettings}
+        >
+          Google Drive 설정
+        </button>
+      </section>
+    </div>
+  )
+}
+
+function DriveModal({
   driveState,
   driveBusy,
   remoteBackup,
-  onHomeLogoPick,
-  onHomeLogoRemove,
+  driveBackups,
   onClose,
-  onUpdate,
   onDriveStateChange,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
   onDriveCheckLatest,
   onDriveRestoreLatest,
-  onDrivePickBackup,
-  onDriveImportJsonl,
   onDriveDismissRemote,
-  onResetSettings,
-  onResetAll,
 }: {
-  settings: ViewerSettings
-  homeLogo?: string
   driveState: GoogleDriveState
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
-  onHomeLogoPick: () => void
-  onHomeLogoRemove: () => void
+  driveBackups: DriveBackupFile[]
   onClose: () => void
-  onUpdate: (patch: Partial<ViewerSettings>) => void
   onDriveStateChange: (patch: Partial<GoogleDriveState>) => void
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
   onDriveCheckLatest: () => void
   onDriveRestoreLatest: () => void
-  onDrivePickBackup: () => void
-  onDriveImportJsonl: () => void
   onDriveDismissRemote: () => void
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="settings-modal drive-modal" role="dialog" aria-modal="true">
+        <header className="modal-head">
+          <div>
+            <span className="eyebrow">CHATSHELF</span>
+            <h2>Google Drive</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <GoogleDrivePanel
+          driveState={driveState}
+          driveBusy={driveBusy}
+          remoteBackup={remoteBackup}
+          driveBackups={driveBackups}
+          onDriveStateChange={onDriveStateChange}
+          onDriveConnect={onDriveConnect}
+          onDriveDisconnect={onDriveDisconnect}
+          onDriveBackupNow={onDriveBackupNow}
+          onDriveCheckLatest={onDriveCheckLatest}
+          onDriveRestoreLatest={onDriveRestoreLatest}
+          onDriveDismissRemote={onDriveDismissRemote}
+        />
+      </section>
+    </div>
+  )
+}
+
+function SettingsModal({
+  settings,
+  homeLogo,
+  onHomeLogoPick,
+  onHomeLogoRemove,
+  onClose,
+  onUpdate,
+  onResetSettings,
+  onResetAll,
+}: {
+  settings: ViewerSettings
+  homeLogo?: string
+  onHomeLogoPick: () => void
+  onHomeLogoRemove: () => void
+  onClose: () => void
+  onUpdate: (patch: Partial<ViewerSettings>) => void
   onResetSettings: () => void
   onResetAll: () => void
 }) {
@@ -3895,21 +4018,6 @@ function SettingsModal({
               />
             </label>
           </section>
-
-          <GoogleDrivePanel
-            driveState={driveState}
-            driveBusy={driveBusy}
-            remoteBackup={remoteBackup}
-            onDriveStateChange={onDriveStateChange}
-            onDriveConnect={onDriveConnect}
-            onDriveDisconnect={onDriveDisconnect}
-            onDriveBackupNow={onDriveBackupNow}
-            onDriveCheckLatest={onDriveCheckLatest}
-            onDriveRestoreLatest={onDriveRestoreLatest}
-            onDrivePickBackup={onDrivePickBackup}
-            onDriveImportJsonl={onDriveImportJsonl}
-            onDriveDismissRemote={onDriveDismissRemote}
-          />
 
           <section className="panel">
             <h2>

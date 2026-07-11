@@ -28,6 +28,13 @@ interface TokenClient {
   requestAccessToken: (options?: { prompt?: string }) => void
 }
 
+interface TokenResponse {
+  access_token?: string
+  expires_in?: number
+  error?: string
+  error_description?: string
+}
+
 interface GoogleDriveWindow extends Window {
   google?: {
     accounts?: {
@@ -35,7 +42,8 @@ interface GoogleDriveWindow extends Window {
         initTokenClient: (config: {
           client_id: string
           scope: string
-          callback: (response: { access_token?: string; error?: string }) => void
+          callback: (response: TokenResponse) => void
+          error_callback?: (error: { type?: string; message?: string }) => void
         }) => TokenClient
       }
     }
@@ -78,6 +86,13 @@ interface PickerResponse {
 
 let tokenClient: TokenClient | undefined
 let currentToken: string | undefined
+let tokenExpiresAt = 0
+let pendingTokenRequest:
+  | {
+      resolve: (token: string) => void
+      reject: (error: Error) => void
+    }
+  | undefined
 let scriptsReady: Promise<void> | undefined
 let pickerReady: Promise<void> | undefined
 
@@ -136,30 +151,68 @@ export async function requestGoogleDriveToken(options?: { forcePrompt?: boolean 
   const oauth = api.google?.accounts?.oauth2
   if (!oauth) throw new Error('Google 로그인 모듈을 불러오지 못했습니다.')
 
+  if (
+    currentToken &&
+    !options?.forcePrompt &&
+    tokenExpiresAt > Date.now() + 60_000
+  ) {
+    return currentToken
+  }
+
   return new Promise<string>((resolve, reject) => {
+    pendingTokenRequest = {
+      resolve,
+      reject: (error) => {
+        pendingTokenRequest = undefined
+        reject(error)
+      },
+    }
+
     tokenClient =
       tokenClient ??
       oauth.initTokenClient({
         client_id: googleDriveConfig.clientId,
         scope: googleDriveConfig.scope,
         callback: (response) => {
+          const pending = pendingTokenRequest
+          pendingTokenRequest = undefined
           if (response.error || !response.access_token) {
-            reject(new Error('Google Drive 연결을 완료하지 못했습니다.'))
+            pending?.reject(
+              new Error(
+                response.error_description || 'Google Drive 연결을 완료하지 못했습니다.',
+              ),
+            )
             return
           }
           currentToken = response.access_token
-          resolve(response.access_token)
+          tokenExpiresAt =
+            Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000
+          pending?.resolve(response.access_token)
+        },
+        error_callback: (error) => {
+          const pending = pendingTokenRequest
+          pendingTokenRequest = undefined
+          pending?.reject(
+            new Error(
+              error.message ||
+                (error.type === 'popup_closed'
+                  ? 'Google 연결 창이 닫혔습니다.'
+                  : 'Google Drive 연결을 완료하지 못했습니다.'),
+            ),
+          )
         },
       })
 
     tokenClient.requestAccessToken({
-      prompt: currentToken && !options?.forcePrompt ? '' : 'consent',
+      prompt: options?.forcePrompt ? 'consent' : '',
     })
   })
 }
 
 export function forgetGoogleDriveToken() {
   currentToken = undefined
+  tokenExpiresAt = 0
+  pendingTokenRequest = undefined
   tokenClient = undefined
 }
 
@@ -335,10 +388,7 @@ export async function pickDriveFiles(kind: DriveFileKind, options?: { multiple?:
     if (kind === 'backup') {
       view.setMimeTypes('application/json,text/plain')
     }
-    if (kind === 'jsonl') {
-      view.setMimeTypes('application/json,text/plain')
-    }
-    view.setIncludeFolders(false)
+    view.setIncludeFolders(true)
     view.setSelectFolderEnabled(false)
 
     const builder = new picker.PickerBuilder()

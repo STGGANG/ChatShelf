@@ -389,6 +389,11 @@ input[type='checkbox']:focus-visible {
   align-items: center;
   gap: 0.5rem;
 }
+.drive-home.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: var(--accent-soft);
+}
 
 .home-body {
   display: flex;
@@ -1734,6 +1739,20 @@ input[type='checkbox']:focus-visible {
   color: var(--accent);
   text-underline-offset: 3px;
 }
+.beta-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--r-pill);
+  border: 1px solid color-mix(in srgb, #e0a24a 40%, var(--line));
+  background: color-mix(in srgb, #f6c76f 22%, var(--surface));
+  color: color-mix(in srgb, #9c6a22 82%, var(--ink));
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
 .drive-alert {
   display: grid;
   gap: 0.7rem;
@@ -1754,6 +1773,112 @@ input[type='checkbox']:focus-visible {
 .drive-alert span {
   color: var(--ink-soft);
   font-size: 0.78rem;
+}
+.drive-modal {
+  width: min(680px, 100%);
+}
+.drive-modal .modal-head {
+  margin-bottom: 0.8rem;
+}
+.drive-modal .panel {
+  box-shadow: none;
+}
+.drive-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.drive-summary div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+.drive-summary span,
+.drive-busy {
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+}
+.drive-summary strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+.drive-busy {
+  margin: 0;
+}
+.drive-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.drive-actions-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.drive-actions button,
+.choice-actions button,
+.choice-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.25;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.drive-actions button:hover,
+.choice-actions button:hover,
+.choice-link:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: var(--accent-soft);
+}
+.drive-actions button:disabled,
+.choice-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.choice-modal {
+  width: min(460px, 100%);
+}
+.choice-modal .modal-head {
+  margin-bottom: 0.9rem;
+}
+.choice-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+.choice-actions button {
+  justify-content: flex-start;
+  min-height: 68px;
+  text-align: left;
+}
+.choice-actions button span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.choice-actions button strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+.choice-actions button small {
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.choice-link {
+  width: 100%;
+  margin-top: 0.8rem;
 }
 
 .dual-field {
@@ -2189,6 +2314,11 @@ input[type='checkbox']:focus-visible {
   .settings-modal {
     padding: 1.1rem;
   }
+  .drive-summary,
+  .drive-actions,
+  .drive-actions-pair {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -2197,6 +2327,9 @@ input[type='checkbox']:focus-visible {
   }
   .btn-accent {
     padding: 0 0.9rem;
+  }
+  .home-actions {
+    gap: 0.4rem;
   }
 }
 
