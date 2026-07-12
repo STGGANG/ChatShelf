@@ -1627,26 +1627,34 @@ input[type='checkbox']:focus-visible {
 @media (hover: hover) and (pointer: fine) {
   .settings-modal {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--accent) 38%, var(--line-strong))
-      transparent;
+    scrollbar-color: transparent transparent;
     scrollbar-gutter: stable;
   }
+  .settings-modal:hover,
+  .settings-modal:focus-within {
+    scrollbar-color: color-mix(in srgb, var(--accent) 24%, transparent)
+      transparent;
+  }
   .settings-modal::-webkit-scrollbar {
-    width: 10px;
+    width: 14px;
   }
   .settings-modal::-webkit-scrollbar-track {
     background: transparent;
-    margin: 1rem 0;
+    margin: 1.15rem 0;
   }
   .settings-modal::-webkit-scrollbar-thumb {
-    border: 3px solid transparent;
+    border: 5px solid transparent;
     border-radius: var(--r-pill);
+    background: transparent padding-box;
+  }
+  .settings-modal:hover::-webkit-scrollbar-thumb,
+  .settings-modal:focus-within::-webkit-scrollbar-thumb {
     background:
-      color-mix(in srgb, var(--accent) 34%, var(--line-strong)) padding-box;
+      color-mix(in srgb, var(--accent) 26%, transparent) padding-box;
   }
   .settings-modal::-webkit-scrollbar-thumb:hover {
     background:
-      color-mix(in srgb, var(--accent) 54%, var(--line-strong)) padding-box;
+      color-mix(in srgb, var(--accent) 42%, transparent) padding-box;
   }
 }
 @keyframes modal-in {
