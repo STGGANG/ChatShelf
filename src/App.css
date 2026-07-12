@@ -1193,6 +1193,7 @@ input[type='checkbox']:focus-visible {
   font-size: var(--reader-font-size);
   line-height: var(--reader-line-height);
   color: var(--ink);
+  font-synthesis: style;
   word-break: break-word;
 }
 .markdown-body > * {
@@ -1218,8 +1219,10 @@ input[type='checkbox']:focus-visible {
 .markdown-body h3 {
   font-size: 1.12em;
 }
-.markdown-body em {
+.markdown-body em,
+.markdown-body i {
   color: var(--ink-soft);
+  font-style: italic;
 }
 .markdown-body strong {
   font-weight: 700;
