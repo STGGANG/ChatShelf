@@ -1624,6 +1624,31 @@ input[type='checkbox']:focus-visible {
   overflow-y: auto;
   animation: modal-in var(--t) both;
 }
+@media (hover: hover) and (pointer: fine) {
+  .settings-modal {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--accent) 38%, var(--line-strong))
+      transparent;
+    scrollbar-gutter: stable;
+  }
+  .settings-modal::-webkit-scrollbar {
+    width: 10px;
+  }
+  .settings-modal::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 1rem 0;
+  }
+  .settings-modal::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: var(--r-pill);
+    background:
+      color-mix(in srgb, var(--accent) 34%, var(--line-strong)) padding-box;
+  }
+  .settings-modal::-webkit-scrollbar-thumb:hover {
+    background:
+      color-mix(in srgb, var(--accent) 54%, var(--line-strong)) padding-box;
+  }
+}
 @keyframes modal-in {
   from {
     opacity: 0;

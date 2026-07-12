@@ -18,6 +18,8 @@ let html = await readFile(path.join(distDir, 'index.html'), 'utf8')
 html = html
   .replaceAll('href="./favicon.png"', `href="${iconUrl}"`)
   .replaceAll('href="./favicon.svg"', `href="${iconUrl}"`)
+  .replace(/\s*<link\s+rel="apple-touch-icon"[^>]*>\n?/g, '\n')
+  .replace(/\s*<link\s+rel="manifest"[^>]*>\n?/g, '\n')
 
 for (const match of [
   ...html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g),

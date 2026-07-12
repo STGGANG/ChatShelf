@@ -64,17 +64,6 @@ import {
   selectImagePlaceholderAssets,
   stripMarkdownForSnippet,
 } from './lib/markdown'
-import {
-  downloadDriveBackup,
-  downloadDriveFileAsBlob,
-  downloadDriveText,
-  forgetGoogleDriveToken,
-  listDriveBackups,
-  pickDriveFiles,
-  requestGoogleDriveToken,
-  uploadDriveBackup,
-  type DriveBackupFile,
-} from './lib/googleDrive'
 import { parseSillyTavernJsonl } from './lib/parser'
 import {
   clearAllChats,
@@ -110,6 +99,16 @@ import type {
 
 const backupVersion = 1
 const driveStateKey = 'st-chat-viewer:googleDrive'
+const isSingleFileBuild = import.meta.env.VITE_CHATSHELF_SINGLE === 'true'
+
+type DriveBackupFile = import('./lib/googleDrive').DriveBackupFile
+
+async function loadGoogleDriveApi() {
+  if (isSingleFileBuild) {
+    throw new Error('단일 HTML 버전에서는 이 기능을 사용할 수 없습니다.')
+  }
+  return import('./lib/googleDrive')
+}
 
 const defaultGoogleDriveState: GoogleDriveState = {
   connected: false,
@@ -501,6 +500,14 @@ function App() {
   const [remoteBackup, setRemoteBackup] = useState<DriveBackupFile | null>(null)
   const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([])
   const [driveBackupsLoaded, setDriveBackupsLoaded] = useState(false)
+
+  const openChatImport = () => {
+    if (isSingleFileBuild) {
+      fileInputRef.current?.click()
+      return
+    }
+    setImportChoiceOpen(true)
+  }
 
   useEffect(() => {
     getChats().then(async (items) => {
@@ -1399,6 +1406,7 @@ function App() {
   }
 
   const checkDriveBackupFreshness = async () => {
+    const { listDriveBackups } = await loadGoogleDriveApi()
     const backups = await listDriveBackups()
     setDriveBackups(backups)
     setDriveBackupsLoaded(true)
@@ -1428,6 +1436,7 @@ function App() {
     setDriveBusy(true)
     setDriveBackupsLoaded(false)
     try {
+      const { requestGoogleDriveToken } = await loadGoogleDriveApi()
       await requestGoogleDriveToken({ forcePrompt: true })
       await checkDriveBackupFreshness()
       setDriveState((current) => ({ ...current, connected: true }))
@@ -1440,7 +1449,11 @@ function App() {
   }
 
   const disconnectGoogleDrive = () => {
-    forgetGoogleDriveToken()
+    if (!isSingleFileBuild) {
+      void loadGoogleDriveApi().then(({ forgetGoogleDriveToken }) => {
+        forgetGoogleDriveToken()
+      })
+    }
     setRemoteBackup(null)
     setDriveBackupsLoaded(false)
     setDriveState((current) => ({
@@ -1456,6 +1469,8 @@ function App() {
     const revisionAt = driveState.lastLocalRevisionAt ?? new Date().toISOString()
     setDriveBusy(true)
     try {
+      const { listDriveBackups, requestGoogleDriveToken, uploadDriveBackup } =
+        await loadGoogleDriveApi()
       await requestGoogleDriveToken()
       const backup = await buildBackup(revisionAt)
       const uploaded = await uploadDriveBackup(backup)
@@ -1483,6 +1498,8 @@ function App() {
   const restoreDriveBackup = async (file?: DriveBackupFile) => {
     setDriveBusy(true)
     try {
+      const { downloadDriveBackup, listDriveBackups, requestGoogleDriveToken } =
+        await loadGoogleDriveApi()
       await requestGoogleDriveToken()
       const backups = driveBackups.length ? driveBackups : await listDriveBackups()
       setDriveBackups(backups)
@@ -1502,6 +1519,8 @@ function App() {
   const importDriveJsonl = async () => {
     setDriveBusy(true)
     try {
+      const { downloadDriveText, pickDriveFiles, requestGoogleDriveToken } =
+        await loadGoogleDriveApi()
       await requestGoogleDriveToken()
       setDriveState((current) => ({ ...current, connected: true }))
       const picked = await pickDriveFiles({ multiple: true })
@@ -1553,6 +1572,8 @@ function App() {
     if (!selectedChat) return
     setDriveBusy(true)
     try {
+      const { downloadDriveFileAsBlob, pickDriveFiles, requestGoogleDriveToken } =
+        await loadGoogleDriveApi()
       await requestGoogleDriveToken()
       setDriveState((current) => ({ ...current, connected: true }))
       const picked = await pickDriveFiles({ multiple: true })
@@ -1963,7 +1984,7 @@ function App() {
                 type="button"
                 className="btn-accent"
                 title="채팅 추가"
-                onClick={() => setImportChoiceOpen(true)}
+                onClick={openChatImport}
               >
                 <Plus size={16} />
                 <span className="btn-accent-label">채팅 추가</span>
@@ -1976,16 +1997,20 @@ function App() {
               >
                 <Download size={18} />
               </button>
-              <button
-                type="button"
-                className={
-                  driveState.connected ? 'icon-button drive-home active' : 'icon-button drive-home'
-                }
-                title="Google Drive"
-                onClick={() => setDriveModalOpen(true)}
-              >
-                <Cloud size={18} />
-              </button>
+              {!isSingleFileBuild && (
+                <button
+                  type="button"
+                  className={
+                    driveState.connected
+                      ? 'icon-button drive-home active'
+                      : 'icon-button drive-home'
+                  }
+                  title="Google Drive"
+                  onClick={() => setDriveModalOpen(true)}
+                >
+                  <Cloud size={18} />
+                </button>
+              )}
               {!homeBanner && (
                 <button
                   type="button"
@@ -2022,7 +2047,7 @@ function App() {
                 <button
                   type="button"
                   className="btn-accent"
-                  onClick={() => setImportChoiceOpen(true)}
+                  onClick={openChatImport}
                 >
                   <Plus size={16} />
                   첫 채팅 불러오기
@@ -2501,19 +2526,21 @@ function App() {
                   <Image size={16} />
                   기기에서 등록
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void importDriveAssets()}
-                  disabled={!driveState.connected || driveBusy}
-                  title={
-                    driveState.connected
-                      ? 'Google Drive에서 이미지 또는 zip을 선택합니다.'
-                      : 'Google Drive 연결 후 사용할 수 있습니다.'
-                  }
-                >
-                  <Cloud size={16} />
-                  Drive에서 등록
-                </button>
+                {!isSingleFileBuild && (
+                  <button
+                    type="button"
+                    onClick={() => void importDriveAssets()}
+                    disabled={!driveState.connected || driveBusy}
+                    title={
+                      driveState.connected
+                        ? 'Google Drive에서 이미지 또는 zip을 선택합니다.'
+                        : 'Google Drive 연결 후 사용할 수 있습니다.'
+                    }
+                  >
+                    <Cloud size={16} />
+                    Drive에서 등록
+                  </button>
+                )}
                 <button type="button" onClick={() => setAssetGalleryOpen(true)}>
                   <BookOpen size={16} />
                   챗서랍에서 연동
@@ -2735,7 +2762,7 @@ function App() {
         />
       )}
 
-      {driveModalOpen && (
+      {!isSingleFileBuild && driveModalOpen && (
         <DriveModal
           driveState={driveState}
           driveBusy={driveBusy}
@@ -3909,25 +3936,29 @@ function ImportChoiceModal({
               <small>.jsonl 파일을 직접 불러옵니다.</small>
             </span>
           </button>
-          <button type="button" onClick={onPickDrive} disabled={driveBusy}>
-            <Cloud size={18} />
-            <span>
-              <strong>Google Drive에서 선택</strong>
-              <small>
-                {driveConnected
-                  ? 'Drive 파일 선택 창을 엽니다.'
-                  : '처음 한 번 Google 권한 확인이 필요합니다.'}
-              </small>
-            </span>
-          </button>
+          {!isSingleFileBuild && (
+            <button type="button" onClick={onPickDrive} disabled={driveBusy}>
+              <Cloud size={18} />
+              <span>
+                <strong>Google Drive에서 선택</strong>
+                <small>
+                  {driveConnected
+                    ? 'Drive 파일 선택 창을 엽니다.'
+                    : '처음 한 번 Google 권한 확인이 필요합니다.'}
+                </small>
+              </span>
+            </button>
+          )}
         </div>
-        <button
-          type="button"
-          className="choice-link"
-          onClick={onOpenDriveSettings}
-        >
-          Google Drive 설정
-        </button>
+        {!isSingleFileBuild && (
+          <button
+            type="button"
+            className="choice-link"
+            onClick={onOpenDriveSettings}
+          >
+            Google Drive 설정
+          </button>
+        )}
       </section>
     </div>
   )
