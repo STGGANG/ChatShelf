@@ -48,7 +48,8 @@ import {
   normalizeCoverPosition,
   normalizeHomeBannerCoverHeight,
   normalizeHomeCardCoverHeight,
-  normalizeHomeCardDisplayMode,
+  normalizeHomeCardImageMode,
+  normalizeHomeCardLayoutMode,
   normalizeHomeCardMaxColumns,
   resolvePalette,
   saveReadingPositions,
@@ -477,8 +478,11 @@ function normalizedSettings(settings: Partial<ViewerSettings>) {
     homeCardMaxColumns: normalizeHomeCardMaxColumns(
       settings.homeCardMaxColumns,
     ),
-    homeCardDisplayMode: normalizeHomeCardDisplayMode(
-      settings.homeCardDisplayMode,
+    homeCardLayoutMode: normalizeHomeCardLayoutMode(
+      settings.homeCardLayoutMode,
+    ),
+    homeCardImageMode: normalizeHomeCardImageMode(
+      settings.homeCardImageMode,
     ),
   }
 }
@@ -2031,7 +2035,8 @@ function App() {
   }, [
     favoriteChats,
     homeSelectionMode,
-    settings.homeCardDisplayMode,
+    settings.homeCardImageMode,
+    settings.homeCardLayoutMode,
     updateFavoriteScrollState,
   ])
 
@@ -2048,19 +2053,17 @@ function App() {
   const renderChatCard = (
     chat: ViewerChat,
     options?: {
-      displayMode?: ViewerSettings['homeCardDisplayMode']
+      imageMode?: ViewerSettings['homeCardImageMode']
+      layoutMode?: ViewerSettings['homeCardLayoutMode']
       draggable?: boolean
     },
   ) => {
     const percent = readingPercent(chat)
     const progressLabel = percent === 100 ? '읽음' : `${percent}%`
-    const displayMode = options?.displayMode ?? settings.homeCardDisplayMode
-    const simpleMode =
-      displayMode === 'simple-avatar' ||
-      displayMode === 'simple-text'
-    const showAvatarCover =
-      displayMode === 'avatar' ||
-      displayMode === 'simple-avatar'
+    const layoutMode = options?.layoutMode ?? settings.homeCardLayoutMode
+    const imageMode = options?.imageMode ?? settings.homeCardImageMode
+    const simpleMode = layoutMode === 'simple'
+    const showAvatarCover = imageMode === 'avatar'
     const cover = showAvatarCover ? chat.characterAvatar : chat.coverImage
     const selected = selectedHomeChatIds.includes(chat.id)
     const canDrag = Boolean(options?.draggable && !homeSelectionMode)
@@ -2070,7 +2073,6 @@ function App() {
         className={[
           'chat-card',
           simpleMode ? 'chat-card-simple' : '',
-          displayMode === 'simple-text' ? 'text-only' : '',
           selected ? 'selected' : '',
         ]
           .filter(Boolean)
@@ -2090,23 +2092,21 @@ function App() {
             {selected ? <Check size={14} /> : null}
           </span>
         )}
-        {displayMode !== 'simple-text' && (
-          <div className={simpleMode ? 'card-avatar-cover' : 'card-cover'}>
-            {cover ? (
-              <img
-                src={cover}
-                alt=""
-                style={
-                  showAvatarCover
-                    ? avatarImageStyle(chat.characterAvatarCrop)
-                    : undefined
-                }
-              />
-            ) : (
-              <span className="card-initial">{chat.title.slice(0, 1)}</span>
-            )}
-          </div>
-        )}
+        <div className={simpleMode ? 'card-avatar-cover' : 'card-cover'}>
+          {cover ? (
+            <img
+              src={cover}
+              alt=""
+              style={
+                showAvatarCover
+                  ? avatarImageStyle(chat.characterAvatarCrop)
+                  : undefined
+              }
+            />
+          ) : (
+            <span className="card-initial">{chat.title.slice(0, 1)}</span>
+          )}
+        </div>
         <div className="card-body">
           <button
             type="button"
@@ -2374,7 +2374,7 @@ function App() {
             </section>
           )}
 
-          <div className={`home-body home-card-${settings.homeCardDisplayMode}`}>
+          <div className={`home-body home-card-${settings.homeCardLayoutMode}`}>
             {chats.length === 0 ? (
               <div className="empty-state">
                 <span className="empty-icon">
@@ -2433,7 +2433,7 @@ function App() {
                       )}
                       <div className="favorite-rail" ref={favoriteRailRef}>
                         {favoriteChats.map((chat) =>
-                          renderChatCard(chat, { displayMode: 'cover' }),
+                          renderChatCard(chat, { layoutMode: 'basic' }),
                         )}
                       </div>
                       {favoriteScrollState.canScrollRight && (
@@ -4925,26 +4925,23 @@ function SettingsModal({
               />
             </label>
             <label className="settings-span">
-              채팅방 커버 이미지 표시 방법
+              채팅방 카드 레이아웃 표시방법
               <select
-                value={settings.homeCardDisplayMode}
+                value={settings.homeCardLayoutMode}
                 onChange={(event) =>
                   onUpdate({
-                    homeCardDisplayMode:
+                    homeCardLayoutMode:
                       event.currentTarget
-                        .value as ViewerSettings['homeCardDisplayMode'],
+                        .value as ViewerSettings['homeCardLayoutMode'],
                   })
                 }
               >
-                <option value="cover">기본 (채팅방 커버 이미지 노출)</option>
-                <option value="avatar">기본 (캐릭터 아바타 노출)</option>
-                <option value="simple-avatar">심플 (캐릭터 아바타 노출)</option>
-                <option value="simple-text">심플 (텍스트만)</option>
+                <option value="basic">기본</option>
+                <option value="simple">심플</option>
               </select>
             </label>
             <label className="settings-span settings-desktop-only">
-              {settings.homeCardDisplayMode === 'simple-avatar' ||
-              settings.homeCardDisplayMode === 'simple-text'
+              {settings.homeCardLayoutMode === 'simple'
                 ? '하나의 행에 보여질 최대 카드 수 (즐겨찾기)'
                 : '하나의 행에 보여질 최대 카드 수'}{' '}
               {settings.homeCardMaxColumns}개
@@ -4960,6 +4957,21 @@ function SettingsModal({
                   })
                 }
               />
+            </label>
+            <label className="settings-span">
+              채팅방 커버 이미지 표시 방법
+              <select
+                value={settings.homeCardImageMode}
+                onChange={(event) =>
+                  onUpdate({
+                    homeCardImageMode:
+                      event.currentTarget.value as ViewerSettings['homeCardImageMode'],
+                  })
+                }
+              >
+                <option value="cover">커버 이미지</option>
+                <option value="avatar">캐릭터 아바타 이미지</option>
+              </select>
             </label>
             <label className="settings-span">
               채팅방 커버 이미지 높이 {settings.homeCardCoverHeight}px

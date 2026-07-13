@@ -8,11 +8,9 @@ export type TagDisplayMode = 'collapsed' | 'expanded' | 'hidden'
 
 export type CoverImageMode = 'grayscale' | 'dark' | 'original'
 
-export type HomeCardDisplayMode =
-  | 'cover'
-  | 'avatar'
-  | 'simple-avatar'
-  | 'simple-text'
+export type HomeCardLayoutMode = 'basic' | 'simple'
+
+export type HomeCardImageMode = 'cover' | 'avatar'
 
 export type AssetDisplayMode = 'default' | 'framed'
 
@@ -220,7 +218,8 @@ export interface ViewerSettings {
   homeBannerCoverPosition: number
   homeCardMaxColumns: number
   homeCardCoverHeight: number
-  homeCardDisplayMode: HomeCardDisplayMode
+  homeCardLayoutMode: HomeCardLayoutMode
+  homeCardImageMode: HomeCardImageMode
 }
 
 export interface GoogleDriveState {

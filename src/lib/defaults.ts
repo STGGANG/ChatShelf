@@ -354,7 +354,8 @@ export const defaultSettings: ViewerSettings = {
   homeBannerCoverPosition: 50,
   homeCardMaxColumns: 6,
   homeCardCoverHeight: 150,
-  homeCardDisplayMode: 'cover',
+  homeCardLayoutMode: 'basic',
+  homeCardImageMode: 'cover',
 }
 
 export function normalizeCoverPosition(value?: number) {
@@ -395,13 +396,39 @@ export function normalizeCoverImageMode(value?: string) {
     : defaultSettings.coverImageMode
 }
 
-export function normalizeHomeCardDisplayMode(value?: string) {
+type LegacyHomeCardDisplayMode =
+  | 'cover'
+  | 'avatar'
+  | 'simple-avatar'
+  | 'simple-text'
+
+function legacyHomeCardDisplayMode(value?: string): LegacyHomeCardDisplayMode | undefined {
   return value === 'cover' ||
     value === 'avatar' ||
     value === 'simple-avatar' ||
     value === 'simple-text'
     ? value
-    : defaultSettings.homeCardDisplayMode
+    : undefined
+}
+
+export function normalizeHomeCardLayoutMode(
+  value?: string,
+  legacyDisplayMode?: string,
+) {
+  if (value === 'basic' || value === 'simple') return value
+  const legacy = legacyHomeCardDisplayMode(legacyDisplayMode)
+  if (legacy === 'simple-avatar' || legacy === 'simple-text') return 'simple'
+  return defaultSettings.homeCardLayoutMode
+}
+
+export function normalizeHomeCardImageMode(
+  value?: string,
+  legacyDisplayMode?: string,
+) {
+  if (value === 'cover' || value === 'avatar') return value
+  const legacy = legacyHomeCardDisplayMode(legacyDisplayMode)
+  if (legacy === 'avatar' || legacy === 'simple-avatar') return 'avatar'
+  return defaultSettings.homeCardImageMode
 }
 
 export const settingsKey = 'st-chat-viewer:settings'
@@ -411,6 +438,7 @@ export function loadSettings(): ViewerSettings {
     const raw = localStorage.getItem(settingsKey)
     if (!raw) return defaultSettings
     const parsed = JSON.parse(raw) as Partial<ViewerSettings> & {
+      homeCardDisplayMode?: string
       homeCardWidth?: number
     }
     const fonts = mergeFonts(parsed.fonts)
@@ -471,7 +499,12 @@ export function loadSettings(): ViewerSettings {
         parsed.homeCardMaxColumns,
         parsed.homeCardWidth,
       ),
-      homeCardDisplayMode: normalizeHomeCardDisplayMode(
+      homeCardLayoutMode: normalizeHomeCardLayoutMode(
+        parsed.homeCardLayoutMode,
+        parsed.homeCardDisplayMode,
+      ),
+      homeCardImageMode: normalizeHomeCardImageMode(
+        parsed.homeCardImageMode,
         parsed.homeCardDisplayMode,
       ),
     }
