@@ -2045,15 +2045,22 @@ function App() {
     window.setTimeout(updateFavoriteScrollState, 260)
   }
 
-  const renderChatCard = (chat: ViewerChat, options?: { draggable?: boolean }) => {
+  const renderChatCard = (
+    chat: ViewerChat,
+    options?: {
+      displayMode?: ViewerSettings['homeCardDisplayMode']
+      draggable?: boolean
+    },
+  ) => {
     const percent = readingPercent(chat)
     const progressLabel = percent === 100 ? '읽음' : `${percent}%`
+    const displayMode = options?.displayMode ?? settings.homeCardDisplayMode
     const simpleMode =
-      settings.homeCardDisplayMode === 'simple-avatar' ||
-      settings.homeCardDisplayMode === 'simple-text'
+      displayMode === 'simple-avatar' ||
+      displayMode === 'simple-text'
     const showAvatarCover =
-      settings.homeCardDisplayMode === 'avatar' ||
-      settings.homeCardDisplayMode === 'simple-avatar'
+      displayMode === 'avatar' ||
+      displayMode === 'simple-avatar'
     const cover = showAvatarCover ? chat.characterAvatar : chat.coverImage
     const selected = selectedHomeChatIds.includes(chat.id)
     const canDrag = Boolean(options?.draggable && !homeSelectionMode)
@@ -2063,7 +2070,7 @@ function App() {
         className={[
           'chat-card',
           simpleMode ? 'chat-card-simple' : '',
-          settings.homeCardDisplayMode === 'simple-text' ? 'text-only' : '',
+          displayMode === 'simple-text' ? 'text-only' : '',
           selected ? 'selected' : '',
         ]
           .filter(Boolean)
@@ -2083,7 +2090,7 @@ function App() {
             {selected ? <Check size={14} /> : null}
           </span>
         )}
-        {settings.homeCardDisplayMode !== 'simple-text' && (
+        {displayMode !== 'simple-text' && (
           <div className={simpleMode ? 'card-avatar-cover' : 'card-cover'}>
             {cover ? (
               <img
@@ -2425,7 +2432,9 @@ function App() {
                         </button>
                       )}
                       <div className="favorite-rail" ref={favoriteRailRef}>
-                        {favoriteChats.map((chat) => renderChatCard(chat))}
+                        {favoriteChats.map((chat) =>
+                          renderChatCard(chat, { displayMode: 'cover' }),
+                        )}
                       </div>
                       {favoriteScrollState.canScrollRight && (
                         <button
@@ -4933,24 +4942,25 @@ function SettingsModal({
                 <option value="simple-text">심플 (텍스트만)</option>
               </select>
             </label>
-            {(settings.homeCardDisplayMode === 'cover' ||
-              settings.homeCardDisplayMode === 'avatar') && (
-              <label className="settings-span settings-desktop-only">
-                하나의 행에 보여질 최대 카드 수 {settings.homeCardMaxColumns}개
-                <input
-                  type="range"
-                  min={3}
-                  max={7}
-                  step={1}
-                  value={settings.homeCardMaxColumns}
-                  onChange={(event) =>
-                    onUpdate({
-                      homeCardMaxColumns: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-              </label>
-            )}
+            <label className="settings-span settings-desktop-only">
+              {settings.homeCardDisplayMode === 'simple-avatar' ||
+              settings.homeCardDisplayMode === 'simple-text'
+                ? '하나의 행에 보여질 최대 카드 수 (즐겨찾기)'
+                : '하나의 행에 보여질 최대 카드 수'}{' '}
+              {settings.homeCardMaxColumns}개
+              <input
+                type="range"
+                min={3}
+                max={7}
+                step={1}
+                value={settings.homeCardMaxColumns}
+                onChange={(event) =>
+                  onUpdate({
+                    homeCardMaxColumns: Number(event.currentTarget.value),
+                  })
+                }
+              />
+            </label>
             <label className="settings-span">
               채팅방 커버 이미지 높이 {settings.homeCardCoverHeight}px
               <input

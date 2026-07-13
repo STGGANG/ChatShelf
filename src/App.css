@@ -546,9 +546,9 @@ input[type='checkbox']:focus-visible {
 .favorite-scroll {
   position: relative;
   container-type: inline-size;
-  margin: -0.35rem -0.45rem -0.65rem;
+  margin: 0;
   overflow: hidden;
-  padding: 0.35rem 0.45rem 0.65rem;
+  padding: 0.1rem 0.2rem 0.15rem;
 }
 .favorite-scroll::before,
 .favorite-scroll::after {
@@ -586,7 +586,7 @@ input[type='checkbox']:focus-visible {
   display: flex;
   gap: 1rem;
   overflow-x: auto;
-  padding: 0.25rem 0.65rem 0.85rem;
+  padding: 0.1rem 0.35rem 0.35rem;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
@@ -715,6 +715,7 @@ input[type='checkbox']:focus-visible {
 }
 .favorite-rail .chat-card:hover {
   transform: none;
+  box-shadow: var(--shadow-sm);
 }
 .card-cover {
   position: relative;
@@ -3001,7 +3002,7 @@ input[type='checkbox']:focus-visible {
     gap: 0.75rem;
   }
   .favorite-rail {
-    padding: 0.2rem 0.45rem 0.65rem;
+    padding-bottom: 0.25rem;
     scrollbar-width: none;
   }
   .favorite-rail::-webkit-scrollbar {
