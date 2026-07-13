@@ -218,7 +218,7 @@ export interface ViewerSettings {
   homeTitle: string
   homeBannerCoverHeight: number
   homeBannerCoverPosition: number
-  homeCardWidth: number
+  homeCardMaxColumns: number
   homeCardCoverHeight: number
   homeCardDisplayMode: HomeCardDisplayMode
 }

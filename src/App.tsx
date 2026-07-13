@@ -49,7 +49,7 @@ import {
   normalizeHomeBannerCoverHeight,
   normalizeHomeCardCoverHeight,
   normalizeHomeCardDisplayMode,
-  normalizeHomeCardWidth,
+  normalizeHomeCardMaxColumns,
   resolvePalette,
   saveReadingPositions,
   saveSettings,
@@ -474,7 +474,9 @@ function normalizedSettings(settings: Partial<ViewerSettings>) {
     homeCardCoverHeight: normalizeHomeCardCoverHeight(
       settings.homeCardCoverHeight,
     ),
-    homeCardWidth: normalizeHomeCardWidth(settings.homeCardWidth),
+    homeCardMaxColumns: normalizeHomeCardMaxColumns(
+      settings.homeCardMaxColumns,
+    ),
     homeCardDisplayMode: normalizeHomeCardDisplayMode(
       settings.homeCardDisplayMode,
     ),
@@ -1829,6 +1831,9 @@ function App() {
   }
 
   const palette = useMemo(() => resolvePalette(settings), [settings])
+  const homeCardGapSpace = `${Number(
+    ((settings.homeCardMaxColumns - 1) * 1.1).toFixed(2),
+  )}rem`
 
   const appStyle = {
     '--bg': palette.bg,
@@ -1855,8 +1860,7 @@ function App() {
     '--cover-position': `${settings.coverPosition}%`,
     '--home-banner-cover-height': `${settings.homeBannerCoverHeight}px`,
     '--home-banner-cover-position': `${settings.homeBannerCoverPosition}%`,
-    '--home-card-base-width': `${settings.homeCardWidth}px`,
-    '--home-card-width': `${settings.homeCardWidth}px`,
+    '--home-card-width': `max(170px, calc((100% - ${homeCardGapSpace}) / ${settings.homeCardMaxColumns}))`,
     '--home-card-cover-height': `${settings.homeCardCoverHeight}px`,
   } as React.CSSProperties
 
@@ -4929,21 +4933,24 @@ function SettingsModal({
                 <option value="simple-text">심플 (텍스트만)</option>
               </select>
             </label>
-            <label className="settings-span settings-desktop-only">
-              채팅방 카드 폭 {settings.homeCardWidth}px
-              <input
-                type="range"
-                min={160}
-                max={340}
-                step={10}
-                value={settings.homeCardWidth}
-                onChange={(event) =>
-                  onUpdate({
-                    homeCardWidth: Number(event.currentTarget.value),
-                  })
-                }
-              />
-            </label>
+            {(settings.homeCardDisplayMode === 'cover' ||
+              settings.homeCardDisplayMode === 'avatar') && (
+              <label className="settings-span settings-desktop-only">
+                하나의 행에 보여질 최대 카드 수 {settings.homeCardMaxColumns}개
+                <input
+                  type="range"
+                  min={3}
+                  max={7}
+                  step={1}
+                  value={settings.homeCardMaxColumns}
+                  onChange={(event) =>
+                    onUpdate({
+                      homeCardMaxColumns: Number(event.currentTarget.value),
+                    })
+                  }
+                />
+              </label>
+            )}
             <label className="settings-span">
               채팅방 커버 이미지 높이 {settings.homeCardCoverHeight}px
               <input
@@ -5080,6 +5087,23 @@ function SettingsModal({
                 }
               />
             </label>
+            <label>
+              메시지 표시 개수 (스크롤){' '}
+              {settings.scrollWindowSize === 0 ? '전체' : `${settings.scrollWindowSize}개`}
+              <input
+                type="range"
+                min={0}
+                max={50}
+                step={5}
+                value={settings.scrollWindowSize}
+                onChange={(event) =>
+                  onUpdate({ scrollWindowSize: Number(event.currentTarget.value) })
+                }
+              />
+              <span className="shortcut-hint">
+                0은 전체 표시이며, 장기 채팅에서는 느려질 수 있습니다.
+              </span>
+            </label>
           </section>
 
           <section className="panel settings-wide settings-single">
@@ -5102,23 +5126,6 @@ function SettingsModal({
                 <option value="original">원문</option>
                 <option value="both">원문 + 번역</option>
               </select>
-            </label>
-            <label>
-              메시지 표시 개수 (스크롤){' '}
-              {settings.scrollWindowSize === 0 ? '전체' : `${settings.scrollWindowSize}개`}
-              <input
-                type="range"
-                min={0}
-                max={50}
-                step={5}
-                value={settings.scrollWindowSize}
-                onChange={(event) =>
-                  onUpdate({ scrollWindowSize: Number(event.currentTarget.value) })
-                }
-              />
-              <span className="shortcut-hint">
-                0은 전체 표시이며, 장기 채팅에서는 느려질 수 있습니다.
-              </span>
             </label>
             <label className="check-row">
               <input

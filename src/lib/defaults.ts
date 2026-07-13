@@ -352,7 +352,7 @@ export const defaultSettings: ViewerSettings = {
   homeTitle: '나의 서랍',
   homeBannerCoverHeight: 220,
   homeBannerCoverPosition: 50,
-  homeCardWidth: 220,
+  homeCardMaxColumns: 6,
   homeCardCoverHeight: 150,
   homeCardDisplayMode: 'cover',
 }
@@ -376,11 +376,17 @@ export function normalizeHomeCardCoverHeight(value?: number) {
   return Math.min(Math.max(Math.round(value), 110), 260)
 }
 
-export function normalizeHomeCardWidth(value?: number) {
+export function normalizeHomeCardMaxColumns(value?: number, legacyWidth?: number) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return defaultSettings.homeCardWidth
+    if (typeof legacyWidth === 'number' && Number.isFinite(legacyWidth)) {
+      if (legacyWidth <= 180) return 7
+      if (legacyWidth <= 220) return 6
+      if (legacyWidth <= 270) return 5
+      return 4
+    }
+    return defaultSettings.homeCardMaxColumns
   }
-  return Math.min(Math.max(Math.round(value), 160), 340)
+  return Math.min(Math.max(Math.round(value), 3), 7)
 }
 
 export function normalizeCoverImageMode(value?: string) {
@@ -404,7 +410,9 @@ export function loadSettings(): ViewerSettings {
   try {
     const raw = localStorage.getItem(settingsKey)
     if (!raw) return defaultSettings
-    const parsed = JSON.parse(raw) as Partial<ViewerSettings>
+    const parsed = JSON.parse(raw) as Partial<ViewerSettings> & {
+      homeCardWidth?: number
+    }
     const fonts = mergeFonts(parsed.fonts)
     const readingFont = resolveFont(fonts, parsed.fontId)
     const uiFont = resolveFont(fonts, parsed.uiFontId)
@@ -459,7 +467,10 @@ export function loadSettings(): ViewerSettings {
       homeCardCoverHeight: normalizeHomeCardCoverHeight(
         parsed.homeCardCoverHeight,
       ),
-      homeCardWidth: normalizeHomeCardWidth(parsed.homeCardWidth),
+      homeCardMaxColumns: normalizeHomeCardMaxColumns(
+        parsed.homeCardMaxColumns,
+        parsed.homeCardWidth,
+      ),
       homeCardDisplayMode: normalizeHomeCardDisplayMode(
         parsed.homeCardDisplayMode,
       ),
