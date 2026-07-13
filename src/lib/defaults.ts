@@ -277,7 +277,7 @@ export const builtinThemes: ThemeDefinition[] = [
       lineStrong: '#ccd3ac',
       accent: '#d7b84d',
       accentSoft: '#f6edc5',
-      onAccent: '#363120',
+      onAccent: '#fffefa',
     },
   },
   {
@@ -343,6 +343,7 @@ export const defaultSettings: ViewerSettings = {
   keyboardShortcutsEnabled: true,
   showProgressBar: true,
   showAvatars: true,
+  showRoleBadges: true,
   notesEnabled: true,
   highlightEnabled: true,
   showMessageMeta: true,
@@ -351,7 +352,9 @@ export const defaultSettings: ViewerSettings = {
   homeTitle: '나의 서랍',
   homeBannerCoverHeight: 220,
   homeBannerCoverPosition: 50,
+  homeCardWidth: 220,
   homeCardCoverHeight: 150,
+  homeCardDisplayMode: 'cover',
 }
 
 export function normalizeCoverPosition(value?: number) {
@@ -371,6 +374,28 @@ export function normalizeHomeCardCoverHeight(value?: number) {
     return defaultSettings.homeCardCoverHeight
   }
   return Math.min(Math.max(Math.round(value), 110), 260)
+}
+
+export function normalizeHomeCardWidth(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return defaultSettings.homeCardWidth
+  }
+  return Math.min(Math.max(Math.round(value), 160), 340)
+}
+
+export function normalizeCoverImageMode(value?: string) {
+  return value === 'dark' || value === 'grayscale' || value === 'original'
+    ? value
+    : defaultSettings.coverImageMode
+}
+
+export function normalizeHomeCardDisplayMode(value?: string) {
+  return value === 'cover' ||
+    value === 'avatar' ||
+    value === 'simple-avatar' ||
+    value === 'simple-text'
+    ? value
+    : defaultSettings.homeCardDisplayMode
 }
 
 export const settingsKey = 'st-chat-viewer:settings'
@@ -416,6 +441,7 @@ export function loadSettings(): ViewerSettings {
       notesEnabled: parsed.notesEnabled ?? defaultSettings.notesEnabled,
       highlightEnabled: parsed.highlightEnabled ?? defaultSettings.highlightEnabled,
       showMessageMeta: parsed.showMessageMeta ?? defaultSettings.showMessageMeta,
+      showRoleBadges: parsed.showRoleBadges ?? defaultSettings.showRoleBadges,
       hideAiThinking: parsed.hideAiThinking ?? defaultSettings.hideAiThinking,
       autoHideTopbar: parsed.autoHideTopbar ?? defaultSettings.autoHideTopbar,
       homeTitle:
@@ -423,6 +449,7 @@ export function loadSettings(): ViewerSettings {
           ? parsed.homeTitle
           : defaultSettings.homeTitle,
       coverPosition: normalizeCoverPosition(parsed.coverPosition),
+      coverImageMode: normalizeCoverImageMode(parsed.coverImageMode),
       homeBannerCoverHeight: normalizeHomeBannerCoverHeight(
         parsed.homeBannerCoverHeight,
       ),
@@ -431,6 +458,10 @@ export function loadSettings(): ViewerSettings {
       ),
       homeCardCoverHeight: normalizeHomeCardCoverHeight(
         parsed.homeCardCoverHeight,
+      ),
+      homeCardWidth: normalizeHomeCardWidth(parsed.homeCardWidth),
+      homeCardDisplayMode: normalizeHomeCardDisplayMode(
+        parsed.homeCardDisplayMode,
       ),
     }
   } catch {

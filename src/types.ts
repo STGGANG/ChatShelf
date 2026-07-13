@@ -6,9 +6,23 @@ export type ReadMode = 'scroll' | 'page'
 
 export type TagDisplayMode = 'collapsed' | 'expanded' | 'hidden'
 
-export type CoverImageMode = 'grayscale' | 'dark' | 'blur' | 'original'
+export type CoverImageMode = 'grayscale' | 'dark' | 'original'
+
+export type HomeCardDisplayMode =
+  | 'cover'
+  | 'avatar'
+  | 'simple-avatar'
+  | 'simple-text'
+
+export type AssetDisplayMode = 'default' | 'framed'
 
 export type DriveImageMode = 'local' | 'drive'
+
+export interface AvatarCrop {
+  x: number
+  y: number
+  scale: number
+}
 
 export interface ThemePalette {
   bg: string
@@ -147,6 +161,8 @@ export interface ViewerChat {
   coverImage?: string
   characterAvatar?: string
   userAvatar?: string
+  characterAvatarCrop?: AvatarCrop
+  userAvatarCrop?: AvatarCrop
   favorite?: boolean
   messages: ViewerMessage[]
   assets: ChatAsset[]
@@ -156,6 +172,7 @@ export interface ViewerChat {
   wordMaskEnabled: boolean
   wordMaskApplyToCopy: boolean
   wordMaskRules: WordMaskRule[]
+  assetDisplayMode?: AssetDisplayMode
   sortOrder: number
   createdAt: string
   importedAt: string
@@ -192,6 +209,7 @@ export interface ViewerSettings {
   keyboardShortcutsEnabled: boolean
   showProgressBar: boolean
   showAvatars: boolean
+  showRoleBadges: boolean
   notesEnabled: boolean
   highlightEnabled: boolean
   showMessageMeta: boolean
@@ -200,7 +218,9 @@ export interface ViewerSettings {
   homeTitle: string
   homeBannerCoverHeight: number
   homeBannerCoverPosition: number
+  homeCardWidth: number
   homeCardCoverHeight: number
+  homeCardDisplayMode: HomeCardDisplayMode
 }
 
 export interface GoogleDriveState {
@@ -217,6 +237,7 @@ export interface ViewerBackup {
   version: 1
   exportedAt: string
   localRevisionAt?: string
+  assetsExcluded?: boolean
   chats: ViewerChat[]
   assetLibrary?: ChatAsset[]
   settings: ViewerSettings

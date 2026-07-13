@@ -5,6 +5,8 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Cloud,
   Copy,
   Download,
@@ -42,9 +44,12 @@ import {
   defaultSettings,
   loadReadingPositions,
   loadSettings,
+  normalizeCoverImageMode,
   normalizeCoverPosition,
   normalizeHomeBannerCoverHeight,
   normalizeHomeCardCoverHeight,
+  normalizeHomeCardDisplayMode,
+  normalizeHomeCardWidth,
   resolvePalette,
   saveReadingPositions,
   saveSettings,
@@ -82,6 +87,7 @@ import {
 } from './lib/storage'
 import { collectTagNames, splitTaggedText } from './lib/tags'
 import type {
+  AvatarCrop,
   ChatAsset,
   GoogleDriveState,
   MessageHighlight,
@@ -114,12 +120,34 @@ const defaultGoogleDriveState: GoogleDriveState = {
   connected: false,
 }
 
+const defaultAvatarCrop: AvatarCrop = {
+  x: 50,
+  y: 50,
+  scale: 1,
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
+}
+
+function normalizeAvatarCrop(value?: Partial<AvatarCrop>): AvatarCrop {
+  return {
+    x: clamp(Math.round(value?.x ?? defaultAvatarCrop.x), 0, 100),
+    y: clamp(Math.round(value?.y ?? defaultAvatarCrop.y), 0, 100),
+    scale: clamp(Number(value?.scale ?? defaultAvatarCrop.scale), 1, 2.6),
+  }
+}
+
+function avatarImageStyle(crop?: AvatarCrop): CSSProperties {
+  const normalized = normalizeAvatarCrop(crop)
+  return {
+    objectPosition: `${normalized.x}% ${normalized.y}%`,
+    transform: `scale(${normalized.scale})`,
+  }
 }
 
 function loadGoogleDriveState(): GoogleDriveState {
@@ -180,6 +208,12 @@ function normalizeAsset(asset: ChatAsset): ChatAsset {
     dataUrl: asset.dataUrl ?? '',
     addedAt: asset.addedAt || new Date().toISOString(),
   }
+}
+
+function normalizeAssetDisplayMode(
+  value?: string,
+): NonNullable<ViewerChat['assetDisplayMode']> {
+  return value === 'framed' || value === 'flush' ? 'framed' : 'default'
 }
 
 interface AssetBundle {
@@ -351,6 +385,14 @@ async function hydrateChatsForBackup(chats: ViewerChat[]) {
   return backupChats
 }
 
+function stripImageAssetsForBackup(chats: ViewerChat[]) {
+  return chats.map((chat) => ({
+    ...chat,
+    assets: [],
+    assetIds: [],
+  }))
+}
+
 function normalizeChat(chat: ViewerChat): ViewerChat {
   return {
     ...chat,
@@ -362,6 +404,9 @@ function normalizeChat(chat: ViewerChat): ViewerChat {
     wordMaskEnabled: chat.wordMaskEnabled ?? false,
     wordMaskApplyToCopy: chat.wordMaskApplyToCopy ?? false,
     wordMaskRules: normalizeWordMaskRules(chat.wordMaskRules),
+    assetDisplayMode: normalizeAssetDisplayMode(chat.assetDisplayMode),
+    characterAvatarCrop: normalizeAvatarCrop(chat.characterAvatarCrop),
+    userAvatarCrop: normalizeAvatarCrop(chat.userAvatarCrop),
     messages: chat.messages.map((message) => ({
       ...message,
       swipes: message.swipes ?? [],
@@ -418,6 +463,7 @@ function normalizedSettings(settings: Partial<ViewerSettings>) {
       ...settings.customPalette,
     },
     customThemes: settings.customThemes ?? [],
+    coverImageMode: normalizeCoverImageMode(settings.coverImageMode),
     coverPosition: normalizeCoverPosition(settings.coverPosition),
     homeBannerCoverHeight: normalizeHomeBannerCoverHeight(
       settings.homeBannerCoverHeight,
@@ -427,6 +473,10 @@ function normalizedSettings(settings: Partial<ViewerSettings>) {
     ),
     homeCardCoverHeight: normalizeHomeCardCoverHeight(
       settings.homeCardCoverHeight,
+    ),
+    homeCardWidth: normalizeHomeCardWidth(settings.homeCardWidth),
+    homeCardDisplayMode: normalizeHomeCardDisplayMode(
+      settings.homeCardDisplayMode,
     ),
   }
 }
@@ -447,6 +497,7 @@ function App() {
   const readingSaveTimerRef = useRef<number | null>(null)
   const openedChatRef = useRef<string>(undefined)
   const prependAnchorRef = useRef<number | null>(null)
+  const favoriteRailRef = useRef<HTMLDivElement>(null)
   const [chats, setChats] = useState<ViewerChat[]>([])
   const [selectedId, setSelectedId] = useState<string>()
   const [settings, setSettings] = useState<ViewerSettings>(() => loadSettings())
@@ -481,6 +532,15 @@ function App() {
     },
   )
   const [homeQuery, setHomeQuery] = useState('')
+  const [homeSelectionMode, setHomeSelectionMode] = useState(false)
+  const [selectedHomeChatIds, setSelectedHomeChatIds] = useState<string[]>([])
+  const [bulkFolderValue, setBulkFolderValue] = useState('')
+  const [excludeImageAssetsFromBackup, setExcludeImageAssetsFromBackup] =
+    useState(false)
+  const [favoriteScrollState, setFavoriteScrollState] = useState({
+    canScrollLeft: false,
+    canScrollRight: false,
+  })
   const [assetLibrary, setAssetLibrary] = useState<ChatAsset[]>([])
   const [searchFlash, setSearchFlash] = useState<MessageHighlight>()
   const [readingPositions, setReadingPositions] = useState<Record<string, number>>(
@@ -577,16 +637,25 @@ function App() {
   }, [notice])
 
   const buildBackup = useCallback(
-    async (localRevisionAt?: string): Promise<ViewerBackup> => {
-      const [backupChats, backupAssets] = await Promise.all([
-        hydrateChatsForBackup(chats),
-        hydrateAssetsForBackup(assetLibrary),
-      ])
+    async (
+      options?: string | { localRevisionAt?: string; excludeImageAssets?: boolean },
+    ): Promise<ViewerBackup> => {
+      const localRevisionAt =
+        typeof options === 'string' ? options : options?.localRevisionAt
+      const excludeImageAssets =
+        typeof options === 'string' ? false : Boolean(options?.excludeImageAssets)
+      const [backupChats, backupAssets] = excludeImageAssets
+        ? [stripImageAssetsForBackup(chats), []]
+        : await Promise.all([
+            hydrateChatsForBackup(chats),
+            hydrateAssetsForBackup(assetLibrary),
+          ])
 
       return {
         app: 'st-chat-viewer',
         version: backupVersion,
         exportedAt: new Date().toISOString(),
+        assetsExcluded: excludeImageAssets || undefined,
         localRevisionAt:
           localRevisionAt ?? driveState.lastLocalRevisionAt ?? new Date().toISOString(),
         chats: backupChats,
@@ -781,6 +850,16 @@ function App() {
   useEffect(() => {
     setPage((current) => clamp(current, 0, pageCount - 1))
   }, [pageCount])
+
+  useEffect(() => {
+    if (view !== 'reader') return
+    if (settings.readMode !== 'page' || !activeMessage) return
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(activeMessage.id)
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })
+  }, [activeMessage, page, settings.readMode, view])
 
   useEffect(() => {
     if (!focusedMessageId) return
@@ -1110,14 +1189,22 @@ function App() {
   const importCharacterAvatar = async (files: FileList | null) => {
     if (!files?.[0] || !selectedChat) return
     const dataUrl = await readFileAsDataUrl(files[0])
-    await updateChat({ ...selectedChat, characterAvatar: dataUrl })
+    await updateChat({
+      ...selectedChat,
+      characterAvatar: dataUrl,
+      characterAvatarCrop: defaultAvatarCrop,
+    })
     if (charAvatarInputRef.current) charAvatarInputRef.current.value = ''
   }
 
   const importUserAvatar = async (files: FileList | null) => {
     if (!files?.[0] || !selectedChat) return
     const dataUrl = await readFileAsDataUrl(files[0])
-    await updateChat({ ...selectedChat, userAvatar: dataUrl })
+    await updateChat({
+      ...selectedChat,
+      userAvatar: dataUrl,
+      userAvatarCrop: defaultAvatarCrop,
+    })
     if (userAvatarInputRef.current) userAvatarInputRef.current.value = ''
   }
 
@@ -1338,7 +1425,9 @@ function App() {
 
   const exportBackup = async () => {
     const stamp = new Date().toISOString().slice(0, 10)
-    const backup = await buildBackup()
+    const backup = await buildBackup({
+      excludeImageAssets: excludeImageAssetsFromBackup,
+    })
     await downloadBlob(
       `chatshelf-backup-${stamp}.json`,
       backupToBlob(backup),
@@ -1472,7 +1561,10 @@ function App() {
       const { listDriveBackups, requestGoogleDriveToken, uploadDriveBackup } =
         await loadGoogleDriveApi()
       await requestGoogleDriveToken()
-      const backup = await buildBackup(revisionAt)
+      const backup = await buildBackup({
+        localRevisionAt: revisionAt,
+        excludeImageAssets: excludeImageAssetsFromBackup,
+      })
       const uploaded = await uploadDriveBackup(backup)
       const backups = await listDriveBackups()
       setDriveBackups(backups)
@@ -1763,6 +1855,8 @@ function App() {
     '--cover-position': `${settings.coverPosition}%`,
     '--home-banner-cover-height': `${settings.homeBannerCoverHeight}px`,
     '--home-banner-cover-position': `${settings.homeBannerCoverPosition}%`,
+    '--home-card-base-width': `${settings.homeCardWidth}px`,
+    '--home-card-width': `${settings.homeCardWidth}px`,
     '--home-card-cover-height': `${settings.homeCardCoverHeight}px`,
   } as React.CSSProperties
 
@@ -1813,27 +1907,196 @@ function App() {
     )
   }, [chats, homeQuery])
 
+  const visibleHomeChatIds = useMemo(
+    () => [...new Set(homeGroups.flatMap(([, items]) => items.map((chat) => chat.id)))],
+    [homeGroups],
+  )
+  const selectedHomeChats = useMemo(
+    () => chats.filter((chat) => selectedHomeChatIds.includes(chat.id)),
+    [chats, selectedHomeChatIds],
+  )
+
+  useEffect(() => {
+    setSelectedHomeChatIds((current) =>
+      current.filter((id) => chats.some((chat) => chat.id === id)),
+    )
+  }, [chats])
+
+  const toggleHomeSelectionMode = () => {
+    setHomeSelectionMode((current) => {
+      if (current) {
+        setSelectedHomeChatIds([])
+        setBulkFolderValue('')
+      }
+      return !current
+    })
+  }
+
+  const toggleHomeChatSelection = (id: string) => {
+    setSelectedHomeChatIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    )
+  }
+
+  const selectAllVisibleHomeChats = () => {
+    setSelectedHomeChatIds((current) =>
+      current.length === visibleHomeChatIds.length ? [] : visibleHomeChatIds,
+    )
+  }
+
+  const moveSelectedHomeChats = async () => {
+    if (!selectedHomeChatIds.length) return
+    const folder = bulkFolderValue.trim()
+    const now = new Date().toISOString()
+    const selectedSet = new Set(selectedHomeChatIds)
+    const next = sameChatOrder(
+      chats.map((chat) =>
+        selectedSet.has(chat.id) ? { ...chat, folder, updatedAt: now } : chat,
+      ),
+    )
+    markImportantChange()
+    setChats(next)
+    await saveChats(next.filter((chat) => selectedSet.has(chat.id)))
+    setSelectedHomeChatIds([])
+    setBulkFolderValue('')
+    setNotice(
+      folder
+        ? `${selectedSet.size}개 채팅을 폴더로 이동했습니다.`
+        : `${selectedSet.size}개 채팅의 폴더를 해제했습니다.`,
+    )
+  }
+
+  const deleteSelectedHomeChats = async () => {
+    if (!selectedHomeChatIds.length) return
+    const count = selectedHomeChatIds.length
+    const ok = window.confirm(`선택한 ${count}개 채팅을 삭제할까요?`)
+    if (!ok) return
+    const selectedSet = new Set(selectedHomeChatIds)
+    await Promise.all(selectedHomeChatIds.map((id) => deleteChat(id)))
+    const next = chats.filter((chat) => !selectedSet.has(chat.id))
+    markImportantChange()
+    setChats(next)
+    if (selectedId && selectedSet.has(selectedId)) setSelectedId(next[0]?.id)
+    setSelectedHomeChatIds([])
+    setBulkFolderValue('')
+    setNotice(`${count}개 채팅을 삭제했습니다.`)
+  }
+
+  const updateFavoriteScrollState = useCallback(() => {
+    const rail = favoriteRailRef.current
+    if (!rail) {
+      setFavoriteScrollState({ canScrollLeft: false, canScrollRight: false })
+      return
+    }
+    const edgeTolerance = 12
+    const maxLeft = Math.max(0, rail.scrollWidth - rail.clientWidth)
+    const next = {
+      canScrollLeft: rail.scrollLeft > edgeTolerance,
+      canScrollRight:
+        maxLeft > edgeTolerance && rail.scrollLeft < maxLeft - edgeTolerance,
+    }
+    setFavoriteScrollState((current) =>
+      current.canScrollLeft === next.canScrollLeft &&
+      current.canScrollRight === next.canScrollRight
+        ? current
+        : next,
+    )
+  }, [])
+
+  useEffect(() => {
+    const rail = favoriteRailRef.current
+    if (!rail) {
+      setFavoriteScrollState({ canScrollLeft: false, canScrollRight: false })
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      rail.scrollLeft = 0
+      updateFavoriteScrollState()
+    })
+    rail.addEventListener('scroll', updateFavoriteScrollState, { passive: true })
+    window.addEventListener('resize', updateFavoriteScrollState)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      rail.removeEventListener('scroll', updateFavoriteScrollState)
+      window.removeEventListener('resize', updateFavoriteScrollState)
+    }
+  }, [
+    favoriteChats,
+    homeSelectionMode,
+    settings.homeCardDisplayMode,
+    updateFavoriteScrollState,
+  ])
+
+  const scrollFavoriteRail = (direction: -1 | 1) => {
+    const rail = favoriteRailRef.current
+    if (!rail) return
+    rail.scrollBy({
+      left: direction * Math.max(260, rail.clientWidth * 0.72),
+      behavior: 'smooth',
+    })
+    window.setTimeout(updateFavoriteScrollState, 260)
+  }
+
   const renderChatCard = (chat: ViewerChat, options?: { draggable?: boolean }) => {
     const percent = readingPercent(chat)
-    const cover = chat.coverImage
+    const progressLabel = percent === 100 ? '읽음' : `${percent}%`
+    const simpleMode =
+      settings.homeCardDisplayMode === 'simple-avatar' ||
+      settings.homeCardDisplayMode === 'simple-text'
+    const showAvatarCover =
+      settings.homeCardDisplayMode === 'avatar' ||
+      settings.homeCardDisplayMode === 'simple-avatar'
+    const cover = showAvatarCover ? chat.characterAvatar : chat.coverImage
+    const selected = selectedHomeChatIds.includes(chat.id)
+    const canDrag = Boolean(options?.draggable && !homeSelectionMode)
     return (
       <article
         key={chat.id}
-        className="chat-card"
-        draggable={options?.draggable}
-        onClick={() => openChat(chat.id)}
-        onDragStart={
-          options?.draggable ? () => setDraggedChatId(chat.id) : undefined
+        className={[
+          'chat-card',
+          simpleMode ? 'chat-card-simple' : '',
+          settings.homeCardDisplayMode === 'simple-text' ? 'text-only' : '',
+          selected ? 'selected' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        draggable={canDrag}
+        onClick={() =>
+          homeSelectionMode ? toggleHomeChatSelection(chat.id) : openChat(chat.id)
         }
-        onDragOver={options?.draggable ? (event) => event.preventDefault() : undefined}
-        onDrop={options?.draggable ? () => void reorderChat(chat.id) : undefined}
+        onDragStart={
+          canDrag ? () => setDraggedChatId(chat.id) : undefined
+        }
+        onDragOver={canDrag ? (event) => event.preventDefault() : undefined}
+        onDrop={canDrag ? () => void reorderChat(chat.id) : undefined}
       >
-        <div className="card-cover">
-          {cover ? (
-            <img src={cover} alt="" />
-          ) : (
-            <span className="card-initial">{chat.title.slice(0, 1)}</span>
-          )}
+        {homeSelectionMode && (
+          <span className="card-select-indicator" aria-hidden="true">
+            {selected ? <Check size={14} /> : null}
+          </span>
+        )}
+        {settings.homeCardDisplayMode !== 'simple-text' && (
+          <div className={simpleMode ? 'card-avatar-cover' : 'card-cover'}>
+            {cover ? (
+              <img
+                src={cover}
+                alt=""
+                style={
+                  showAvatarCover
+                    ? avatarImageStyle(chat.characterAvatarCrop)
+                    : undefined
+                }
+              />
+            ) : (
+              <span className="card-initial">{chat.title.slice(0, 1)}</span>
+            )}
+          </div>
+        )}
+        <div className="card-body">
           <button
             type="button"
             className={chat.favorite ? 'card-fav active' : 'card-fav'}
@@ -1845,17 +2108,20 @@ function App() {
           >
             <Star size={15} fill={chat.favorite ? 'currentColor' : 'none'} />
           </button>
-          {percent > 0 && (
+          {!simpleMode && percent > 0 && (
             <span className="card-progress">
-              {percent === 100 ? '읽음' : `${percent}%`}
+              {progressLabel}
             </span>
           )}
-        </div>
-        <div className="card-info">
-          <strong>{chat.title}</strong>
-          <small>
-            {chat.characterName ?? '캐릭터 미상'} · {chat.messages.length}개
-          </small>
+          <div className="card-info">
+            <strong>{chat.title}</strong>
+            <small>
+              {chat.characterName ?? '캐릭터 미상'} · {chat.messages.length}개
+              {simpleMode && percent > 0 && (
+                <span className="card-progress-inline">{progressLabel}</span>
+              )}
+            </small>
+          </div>
         </div>
       </article>
     )
@@ -1928,7 +2194,7 @@ function App() {
       )}
 
       {view === 'home' && (
-        <div className="home">
+        <div className={homeSelectionMode ? 'home selecting' : 'home'}>
           {homeBanner && (
             <div className="home-banner">
               <img src={homeBanner} alt="" />
@@ -1992,6 +2258,14 @@ function App() {
               <button
                 type="button"
                 className="icon-button"
+                title={homeSelectionMode ? '일괄 관리 닫기' : '채팅 일괄 관리'}
+                onClick={toggleHomeSelectionMode}
+              >
+                {homeSelectionMode ? <X size={18} /> : <Check size={18} />}
+              </button>
+              <button
+                type="button"
+                className="icon-button"
                 title="기기 백업"
                 onClick={() => setBackupChoiceOpen(true)}
               >
@@ -2032,7 +2306,64 @@ function App() {
             </div>
           </header>
 
-          <div className="home-body">
+          {homeSelectionMode && (
+            <section className="bulk-toolbar" aria-label="채팅 일괄 관리">
+              <div>
+                <strong>{selectedHomeChats.length}개 선택</strong>
+                <span>삭제하거나 폴더를 한 번에 바꿀 수 있습니다.</span>
+              </div>
+              <div className="bulk-actions">
+                <div className="bulk-action-row">
+                  <button
+                    type="button"
+                    className="bulk-select-all"
+                    onClick={selectAllVisibleHomeChats}
+                  >
+                    {selectedHomeChatIds.length === visibleHomeChatIds.length
+                      ? '전체 해제'
+                      : '전체 선택'}
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-action bulk-delete"
+                    onClick={() => void deleteSelectedHomeChats()}
+                    disabled={!selectedHomeChatIds.length}
+                  >
+                    <Trash2 size={15} />
+                    삭제
+                  </button>
+                </div>
+                <div className="bulk-action-row">
+                  <input
+                    value={bulkFolderValue}
+                    className="bulk-folder-select"
+                    aria-label="이동할 폴더 이름"
+                    list="bulk-folder-options"
+                    placeholder="폴더 없음"
+                    onChange={(event) => setBulkFolderValue(event.currentTarget.value)}
+                  />
+                  <datalist id="bulk-folder-options">
+                    {folderOptions.map((folder) => (
+                      <option key={folder} value={folder}>
+                        {folder}
+                      </option>
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    className="bulk-apply-folder"
+                    onClick={() => void moveSelectedHomeChats()}
+                    disabled={!selectedHomeChatIds.length}
+                  >
+                    <Folder size={15} />
+                    폴더 적용
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <div className={`home-body home-card-${settings.homeCardDisplayMode}`}>
             {chats.length === 0 ? (
               <div className="empty-state">
                 <span className="empty-icon">
@@ -2070,8 +2401,38 @@ function App() {
                       <h2>즐겨찾기</h2>
                       <span className="shelf-count">{favoriteChats.length}</span>
                     </div>
-                    <div className="card-grid">
-                      {favoriteChats.map((chat) => renderChatCard(chat))}
+                    <div
+                      className={[
+                        'favorite-scroll',
+                        favoriteScrollState.canScrollLeft ? 'has-more-left' : '',
+                        favoriteScrollState.canScrollRight ? 'has-more-right' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
+                      {favoriteScrollState.canScrollLeft && (
+                        <button
+                          type="button"
+                          className="favorite-nav favorite-nav-prev"
+                          title="이전 즐겨찾기"
+                          onClick={() => scrollFavoriteRail(-1)}
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                      )}
+                      <div className="favorite-rail" ref={favoriteRailRef}>
+                        {favoriteChats.map((chat) => renderChatCard(chat))}
+                      </div>
+                      {favoriteScrollState.canScrollRight && (
+                        <button
+                          type="button"
+                          className="favorite-nav favorite-nav-next"
+                          title="다음 즐겨찾기"
+                          onClick={() => scrollFavoriteRail(1)}
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      )}
                     </div>
                   </section>
                 )}
@@ -2470,7 +2831,7 @@ function App() {
                 folderOptions={folderOptions}
                 onChange={(folder) => updateSelectedChatFields({ folder })}
               />
-              <div className="stacked-buttons">
+              <div className="stacked-buttons chat-info-actions">
                 <button type="button" onClick={() => void toggleFavorite(selectedChat)}>
                   <Star
                     size={16}
@@ -2485,6 +2846,23 @@ function App() {
                   <Image size={16} />
                   커버 이미지 등록
                 </button>
+                {selectedChat.coverImage && (
+                  <label className="tool-inline-control">
+                    채팅창 커버 위치(%) {settings.coverPosition}%
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={settings.coverPosition}
+                      disabled={!settings.showCoverImage}
+                      onChange={(event) =>
+                        updateSettings({
+                          coverPosition: Number(event.currentTarget.value),
+                        })
+                      }
+                    />
+                  </label>
+                )}
                 <button
                   type="button"
                   onClick={() => charAvatarInputRef.current?.click()}
@@ -2492,6 +2870,16 @@ function App() {
                   <ImageUp size={16} />
                   캐릭터 아바타 등록
                 </button>
+                {selectedChat.characterAvatar && (
+                  <AvatarAdjuster
+                    title="캐릭터 아바타 위치"
+                    image={selectedChat.characterAvatar}
+                    crop={selectedChat.characterAvatarCrop}
+                    onChange={(crop) =>
+                      updateSelectedChatFields({ characterAvatarCrop: crop })
+                    }
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => userAvatarInputRef.current?.click()}
@@ -2499,6 +2887,16 @@ function App() {
                   <ImageUp size={16} />
                   유저 아바타 등록
                 </button>
+                {selectedChat.userAvatar && (
+                  <AvatarAdjuster
+                    title="유저 아바타 위치"
+                    image={selectedChat.userAvatar}
+                    crop={selectedChat.userAvatarCrop}
+                    onChange={(crop) =>
+                      updateSelectedChatFields({ userAvatarCrop: crop })
+                    }
+                  />
+                )}
                 <button type="button" onClick={() => void removeSelectedChat()}>
                   <Trash2 size={16} />
                   채팅 삭제
@@ -2546,6 +2944,22 @@ function App() {
                   챗서랍에서 연동
                 </button>
               </div>
+              <label>
+                에셋 표시 방식
+                <select
+                  value={selectedChat.assetDisplayMode ?? 'default'}
+                  onChange={(event) =>
+                    updateSelectedChatFields({
+                      assetDisplayMode:
+                        event.currentTarget
+                          .value as ViewerChat['assetDisplayMode'],
+                    })
+                  }
+                >
+                  <option value="default">기본</option>
+                  <option value="framed">테두리</option>
+                </select>
+              </label>
               <div className="asset-list">
                 <span className="asset-list-title">
                   현재 채팅에 연결된 에셋
@@ -2737,6 +3151,8 @@ function App() {
 
       {backupChoiceOpen && (
         <BackupChoiceModal
+          excludeImageAssets={excludeImageAssetsFromBackup}
+          onExcludeImageAssetsChange={setExcludeImageAssetsFromBackup}
           onClose={() => setBackupChoiceOpen(false)}
           onExport={() => {
             setBackupChoiceOpen(false)
@@ -2769,7 +3185,9 @@ function App() {
           remoteBackup={remoteBackup}
           driveBackups={driveBackups}
           driveBackupsLoaded={driveBackupsLoaded}
+          excludeImageAssets={excludeImageAssetsFromBackup}
           onClose={() => setDriveModalOpen(false)}
+          onExcludeImageAssetsChange={setExcludeImageAssetsFromBackup}
           onDriveConnect={() => void connectGoogleDrive()}
           onDriveDisconnect={disconnectGoogleDrive}
           onDriveBackupNow={() => void saveDriveBackup()}
@@ -2936,15 +3354,25 @@ function MessageCard({
             (() => {
               const avatar =
                 message.role === 'user' ? chat.userAvatar : chat.characterAvatar
+              const crop =
+                message.role === 'user'
+                  ? chat.userAvatarCrop
+                  : chat.characterAvatarCrop
               const label = message.name ?? roleLabel
               return (
                 <span className={`avatar avatar-${message.role}`} aria-hidden="true">
-                  {avatar ? <img src={avatar} alt="" /> : label.slice(0, 1)}
+                  {avatar ? (
+                    <img src={avatar} alt="" style={avatarImageStyle(crop)} />
+                  ) : (
+                    label.slice(0, 1)
+                  )}
                 </span>
               )
             })()}
           <span className="message-name">
-            <span className="role-pill">{roleLabel}</span>
+            {settings.showRoleBadges && (
+              <span className="role-pill">{roleLabel}</span>
+            )}
             <strong>{message.name ?? roleLabel}</strong>
           </span>
         </div>
@@ -3080,6 +3508,7 @@ function MessageBodies({
           settings={settings}
           highlights={highlights}
           maskRules={maskRules}
+          assetDisplayMode={chat.assetDisplayMode ?? 'default'}
           tone="translated"
         />
         <TextBlock
@@ -3089,6 +3518,7 @@ function MessageBodies({
           settings={settings}
           highlights={highlights}
           maskRules={maskRules}
+          assetDisplayMode={chat.assetDisplayMode ?? 'default'}
           tone="original"
         />
       </div>
@@ -3102,12 +3532,19 @@ function MessageBodies({
 
   return (
     <TextBlock
-      label={settings.languageMode === 'original' ? '원문' : hasTranslated ? '번역' : '본문'}
+      label={
+        settings.languageMode === 'original'
+          ? '원문'
+          : hasTranslated
+            ? '번역'
+            : undefined
+      }
       text={text}
       assets={chat.assets}
       settings={settings}
       highlights={highlights}
       maskRules={maskRules}
+      assetDisplayMode={chat.assetDisplayMode ?? 'default'}
     />
   )
 }
@@ -3119,14 +3556,16 @@ function TextBlock({
   settings,
   highlights,
   maskRules,
+  assetDisplayMode,
   tone,
 }: {
-  label: string
+  label?: string
   text: string
   assets: ChatAsset[]
   settings: ViewerSettings
   highlights: MessageHighlight[]
   maskRules: WordMaskRule[]
+  assetDisplayMode: ViewerChat['assetDisplayMode']
   tone?: 'translated' | 'original'
 }) {
   const parts = useMemo(() => splitTaggedText(text), [text])
@@ -3136,7 +3575,7 @@ function TextBlock({
 
   return (
     <section className={tone ? `text-block ${tone}` : 'text-block'}>
-      <span className="text-label">{label}</span>
+      {label && <span className="text-label">{label}</span>}
       <div className="text-flow">
         {segments.map((segment) =>
           segment.type === 'tag' ? (
@@ -3149,6 +3588,7 @@ function TextBlock({
               settings={settings}
               highlights={highlights}
               maskRules={maskRules}
+              assetDisplayMode={assetDisplayMode}
             />
           ),
         )}
@@ -3163,12 +3603,14 @@ function MarkdownChunk({
   settings,
   highlights,
   maskRules,
+  assetDisplayMode,
 }: {
   text: string
   assets: ChatAsset[]
   settings: ViewerSettings
   highlights: MessageHighlight[]
   maskRules: WordMaskRule[]
+  assetDisplayMode: ViewerChat['assetDisplayMode']
 }) {
   const placeholderAssets = useMemo(
     () => selectImagePlaceholderAssets(text, assets),
@@ -3243,7 +3685,12 @@ function MarkdownChunk({
 
   if (!text.trim()) return null
 
-  return <div ref={bodyRef} className="markdown-body" />
+  return (
+    <div
+      ref={bodyRef}
+      className={`markdown-body asset-display-${assetDisplayMode ?? 'default'}`}
+    />
+  )
 }
 
 function TagPanel({
@@ -3632,6 +4079,57 @@ function FolderField({
   )
 }
 
+function AvatarAdjuster({
+  title,
+  image,
+  crop,
+  onChange,
+}: {
+  title: string
+  image: string
+  crop?: AvatarCrop
+  onChange: (crop: AvatarCrop) => void
+}) {
+  const normalized = normalizeAvatarCrop(crop)
+  const updateCrop = (patch: Partial<AvatarCrop>) => {
+    onChange(normalizeAvatarCrop({ ...normalized, ...patch }))
+  }
+
+  return (
+    <div className="avatar-adjuster">
+      <div className="avatar-adjuster-head">
+        <span className="avatar-preview">
+          <img src={image} alt="" style={avatarImageStyle(normalized)} />
+        </span>
+        <strong>{title}</strong>
+      </div>
+      <label>
+        상하 위치 {normalized.y}%
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={normalized.y}
+          onChange={(event) => updateCrop({ y: Number(event.currentTarget.value) })}
+        />
+      </label>
+      <label>
+        확대 {normalized.scale.toFixed(1)}x
+        <input
+          type="range"
+          min={1}
+          max={2.6}
+          step={0.1}
+          value={normalized.scale}
+          onChange={(event) =>
+            updateCrop({ scale: Number(event.currentTarget.value) })
+          }
+        />
+      </label>
+    </div>
+  )
+}
+
 function WordMaskPanel({
   chat,
   onUpdate,
@@ -3789,22 +4287,26 @@ function GoogleDrivePanel({
   remoteBackup,
   driveBackups,
   driveBackupsLoaded,
+  excludeImageAssets,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
   onDriveRestoreLatest,
   onDriveDismissRemote,
+  onExcludeImageAssetsChange,
 }: {
   driveState: GoogleDriveState
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
   driveBackups: DriveBackupFile[]
   driveBackupsLoaded: boolean
+  excludeImageAssets: boolean
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
   onDriveRestoreLatest: () => void
   onDriveDismissRemote: () => void
+  onExcludeImageAssetsChange: (value: boolean) => void
 }) {
   const latestBackup = driveBackups[0]
   const backupLabel = !driveState.connected
@@ -3891,6 +4393,22 @@ function GoogleDrivePanel({
         </button>
       </div>
 
+      <label className="check-row backup-option">
+        <input
+          type="checkbox"
+          checked={excludeImageAssets}
+          onChange={(event) =>
+            onExcludeImageAssetsChange(event.currentTarget.checked)
+          }
+        />
+        <span className="check-copy">
+          이미지 에셋 제외 백업
+          <span className="shortcut-hint">
+            이미지 에셋을 제외하면 백업 용량 및 시간이 단축됩니다.
+          </span>
+        </span>
+      </label>
+
       <p className="setting-note">
         개인정보처리방침:{' '}
         <a href="./privacy.html" target="_blank" rel="noreferrer">
@@ -3965,13 +4483,17 @@ function ImportChoiceModal({
 }
 
 function BackupChoiceModal({
+  excludeImageAssets,
   onClose,
   onExport,
   onImport,
+  onExcludeImageAssetsChange,
 }: {
+  excludeImageAssets: boolean
   onClose: () => void
   onExport: () => void
   onImport: () => void
+  onExcludeImageAssetsChange: (value: boolean) => void
 }) {
   return (
     <div className="modal-backdrop compact-backdrop" role="presentation">
@@ -4001,6 +4523,21 @@ function BackupChoiceModal({
             </span>
           </button>
         </div>
+        <label className="check-row backup-option">
+          <input
+            type="checkbox"
+            checked={excludeImageAssets}
+            onChange={(event) =>
+              onExcludeImageAssetsChange(event.currentTarget.checked)
+            }
+          />
+          <span className="check-copy">
+            이미지 에셋 제외 백업
+            <span className="shortcut-hint">
+              이미지 에셋을 제외하면 백업 용량 및 시간이 단축됩니다.
+            </span>
+          </span>
+        </label>
       </section>
     </div>
   )
@@ -4063,7 +4600,7 @@ function AssetGalleryModal({
           </button>
         </header>
         {bundles.length ? (
-          <div className="asset-gallery-grid">
+          <div className="asset-gallery-list">
             {bundles.map((bundle) => {
               const coverAsset = bundle.assets.find(
                 (asset) => asset.thumbnailDataUrl || asset.dataUrl,
@@ -4075,7 +4612,7 @@ function AssetGalleryModal({
               const partial = linkedCount > 0 && !linked
               const selected = selectedBundleSet.has(bundle.id)
               return (
-                <div
+                <article
                   className={
                     selected
                       ? 'asset-gallery-card selected'
@@ -4091,29 +4628,33 @@ function AssetGalleryModal({
                     disabled={linked}
                     onClick={() => toggleBundle(bundle.id)}
                   >
-                    {coverAsset?.thumbnailDataUrl || coverAsset?.dataUrl ? (
-                      <img
-                        src={coverAsset.thumbnailDataUrl || coverAsset.dataUrl}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span className="asset-thumb-empty">
-                        <Image size={18} />
-                      </span>
-                    )}
-                    <span title={bundle.name}>{bundle.name}</span>
-                    <small>
-                      {bundle.assets.length}개 이미지 ·{' '}
-                      {linked
-                        ? '연동됨'
-                        : selected
-                          ? '선택됨'
-                          : partial
-                            ? `${linkedCount}개 연동됨`
-                            : '선택'}
-                    </small>
+                    <span className="asset-gallery-thumb">
+                      {coverAsset?.thumbnailDataUrl || coverAsset?.dataUrl ? (
+                        <img
+                          src={coverAsset.thumbnailDataUrl || coverAsset.dataUrl}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <span className="asset-thumb-empty">
+                          <Image size={18} />
+                        </span>
+                      )}
+                    </span>
+                    <span className="asset-gallery-info">
+                      <strong title={bundle.name}>{bundle.name}</strong>
+                      <small>
+                        {bundle.assets.length}개 이미지 ·{' '}
+                        {linked
+                          ? '연동됨'
+                          : selected
+                            ? '선택됨'
+                            : partial
+                              ? `${linkedCount}개 연동됨`
+                              : '미연동'}
+                      </small>
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -4128,7 +4669,7 @@ function AssetGalleryModal({
                   >
                     <Trash2 size={14} />
                   </button>
-                </div>
+                </article>
               )
             })}
           </div>
@@ -4156,24 +4697,28 @@ function DriveModal({
   remoteBackup,
   driveBackups,
   driveBackupsLoaded,
+  excludeImageAssets,
   onClose,
   onDriveConnect,
   onDriveDisconnect,
   onDriveBackupNow,
   onDriveRestoreLatest,
   onDriveDismissRemote,
+  onExcludeImageAssetsChange,
 }: {
   driveState: GoogleDriveState
   driveBusy: boolean
   remoteBackup: DriveBackupFile | null
   driveBackups: DriveBackupFile[]
   driveBackupsLoaded: boolean
+  excludeImageAssets: boolean
   onClose: () => void
   onDriveConnect: () => void
   onDriveDisconnect: () => void
   onDriveBackupNow: () => void
   onDriveRestoreLatest: () => void
   onDriveDismissRemote: () => void
+  onExcludeImageAssetsChange: (value: boolean) => void
 }) {
   return (
     <div className="modal-backdrop" role="presentation">
@@ -4193,11 +4738,13 @@ function DriveModal({
           remoteBackup={remoteBackup}
           driveBackups={driveBackups}
           driveBackupsLoaded={driveBackupsLoaded}
+          excludeImageAssets={excludeImageAssets}
           onDriveConnect={onDriveConnect}
           onDriveDisconnect={onDriveDisconnect}
           onDriveBackupNow={onDriveBackupNow}
           onDriveRestoreLatest={onDriveRestoreLatest}
           onDriveDismissRemote={onDriveDismissRemote}
+          onExcludeImageAssetsChange={onExcludeImageAssetsChange}
         />
       </section>
     </div>
@@ -4365,6 +4912,39 @@ function SettingsModal({
               />
             </label>
             <label className="settings-span">
+              채팅방 커버 이미지 표시 방법
+              <select
+                value={settings.homeCardDisplayMode}
+                onChange={(event) =>
+                  onUpdate({
+                    homeCardDisplayMode:
+                      event.currentTarget
+                        .value as ViewerSettings['homeCardDisplayMode'],
+                  })
+                }
+              >
+                <option value="cover">기본 (채팅방 커버 이미지 노출)</option>
+                <option value="avatar">기본 (캐릭터 아바타 노출)</option>
+                <option value="simple-avatar">심플 (캐릭터 아바타 노출)</option>
+                <option value="simple-text">심플 (텍스트만)</option>
+              </select>
+            </label>
+            <label className="settings-span settings-desktop-only">
+              채팅방 카드 폭 {settings.homeCardWidth}px
+              <input
+                type="range"
+                min={160}
+                max={340}
+                step={10}
+                value={settings.homeCardWidth}
+                onChange={(event) =>
+                  onUpdate({
+                    homeCardWidth: Number(event.currentTarget.value),
+                  })
+                }
+              />
+            </label>
+            <label className="settings-span">
               채팅방 커버 이미지 높이 {settings.homeCardCoverHeight}px
               <input
                 type="range"
@@ -4500,19 +5080,6 @@ function SettingsModal({
                 }
               />
             </label>
-            <label>
-              스크롤 표시 개수 {settings.scrollWindowSize === 0 ? '전체' : `${settings.scrollWindowSize}개`}
-              <input
-                type="range"
-                min={0}
-                max={50}
-                step={5}
-                value={settings.scrollWindowSize}
-                onChange={(event) =>
-                  onUpdate({ scrollWindowSize: Number(event.currentTarget.value) })
-                }
-              />
-            </label>
           </section>
 
           <section className="panel settings-wide settings-single">
@@ -4535,6 +5102,23 @@ function SettingsModal({
                 <option value="original">원문</option>
                 <option value="both">원문 + 번역</option>
               </select>
+            </label>
+            <label>
+              메시지 표시 개수 (스크롤){' '}
+              {settings.scrollWindowSize === 0 ? '전체' : `${settings.scrollWindowSize}개`}
+              <input
+                type="range"
+                min={0}
+                max={50}
+                step={5}
+                value={settings.scrollWindowSize}
+                onChange={(event) =>
+                  onUpdate({ scrollWindowSize: Number(event.currentTarget.value) })
+                }
+              />
+              <span className="shortcut-hint">
+                0은 전체 표시이며, 장기 채팅에서는 느려질 수 있습니다.
+              </span>
             </label>
             <label className="check-row">
               <input
@@ -4627,6 +5211,16 @@ function SettingsModal({
             <label className="check-row">
               <input
                 type="checkbox"
+                checked={settings.showRoleBadges}
+                onChange={(event) =>
+                  onUpdate({ showRoleBadges: event.currentTarget.checked })
+                }
+              />
+              채팅방 SYS/AI/USER 뱃지 표시
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
                 checked={settings.showAvatars}
                 onChange={(event) =>
                   onUpdate({ showAvatars: event.currentTarget.checked })
@@ -4659,19 +5253,6 @@ function SettingsModal({
               />
             </label>
             <label>
-              채팅창 커버 위치(%) {settings.coverPosition}%
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={settings.coverPosition}
-                disabled={!settings.showCoverImage}
-                onChange={(event) =>
-                  onUpdate({ coverPosition: Number(event.currentTarget.value) })
-                }
-              />
-            </label>
-            <label>
               채팅창 커버 효과
               <select
                 value={settings.coverImageMode}
@@ -4686,7 +5267,6 @@ function SettingsModal({
                 <option value="original">원본</option>
                 <option value="dark">어둡게</option>
                 <option value="grayscale">흑백</option>
-                <option value="blur">흐리게</option>
               </select>
             </label>
           </section>
