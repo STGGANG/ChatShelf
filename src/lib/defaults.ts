@@ -317,6 +317,7 @@ export const defaultSettings: ViewerSettings = {
   fontId: pretendardFont.id,
   fontFamily: pretendardFont.fontFamily,
   fontWeight: 400,
+  fontWeightBoost: 0,
   uiFontId: pretendardFont.id,
   uiFontFamily: pretendardFont.fontFamily,
   uiFontScale: 1,
@@ -388,6 +389,21 @@ export function normalizeHomeCardMaxColumns(value?: number, legacyWidth?: number
     return defaultSettings.homeCardMaxColumns
   }
   return Math.min(Math.max(Math.round(value), 3), 7)
+}
+
+export function normalizeFontWeightBoost(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return defaultSettings.fontWeightBoost
+  }
+  return Math.min(Math.max(Math.round(value * 10) / 10, 0), 0.4)
+}
+
+export function resolveReaderFontWeight(baseWeight?: number, boost?: number) {
+  const base =
+    typeof baseWeight === 'number' && Number.isFinite(baseWeight)
+      ? baseWeight
+      : defaultSettings.fontWeight
+  return Math.min(Math.max(Math.round(base + normalizeFontWeightBoost(boost) * 1000), 300), 900)
 }
 
 export function normalizeCoverImageMode(value?: string) {
@@ -472,6 +488,7 @@ export function loadSettings(): ViewerSettings {
       keyboardShortcutsEnabled:
         parsed.keyboardShortcutsEnabled ?? defaultSettings.keyboardShortcutsEnabled,
       fontWeight: parsed.fontWeight ?? defaultSettings.fontWeight,
+      fontWeightBoost: normalizeFontWeightBoost(parsed.fontWeightBoost),
       uiFontScale: parsed.uiFontScale ?? defaultSettings.uiFontScale,
       uiFontWeight: parsed.uiFontWeight ?? defaultSettings.uiFontWeight,
       notesEnabled: parsed.notesEnabled ?? defaultSettings.notesEnabled,

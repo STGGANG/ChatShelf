@@ -181,6 +181,7 @@ export interface ViewerSettings {
   fontId: string
   fontFamily: string
   fontWeight: number
+  fontWeightBoost: number
   uiFontId: string
   uiFontFamily: string
   uiFontScale: number

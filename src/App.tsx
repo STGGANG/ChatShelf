@@ -46,11 +46,13 @@ import {
   loadSettings,
   normalizeCoverImageMode,
   normalizeCoverPosition,
+  normalizeFontWeightBoost,
   normalizeHomeBannerCoverHeight,
   normalizeHomeCardCoverHeight,
   normalizeHomeCardImageMode,
   normalizeHomeCardLayoutMode,
   normalizeHomeCardMaxColumns,
+  resolveReaderFontWeight,
   resolvePalette,
   saveReadingPositions,
   saveSettings,
@@ -484,6 +486,7 @@ function normalizedSettings(settings: Partial<ViewerSettings>) {
     homeCardImageMode: normalizeHomeCardImageMode(
       settings.homeCardImageMode,
     ),
+    fontWeightBoost: normalizeFontWeightBoost(settings.fontWeightBoost),
   }
 }
 
@@ -1838,6 +1841,10 @@ function App() {
   const homeCardGapSpace = `${Number(
     ((settings.homeCardMaxColumns - 1) * 1.1).toFixed(2),
   )}rem`
+  const readerFontWeight = resolveReaderFontWeight(
+    settings.fontWeight,
+    settings.fontWeightBoost,
+  )
 
   const appStyle = {
     '--bg': palette.bg,
@@ -1855,7 +1862,7 @@ function App() {
     '--ui-font': settings.uiFontFamily,
     '--ui-font-weight': String(settings.uiFontWeight),
     '--reader-font': settings.fontFamily,
-    '--reader-font-weight': String(settings.fontWeight),
+    '--reader-font-weight': String(readerFontWeight),
     '--reader-font-size': `${settings.fontSize}px`,
     '--reader-line-height': String(settings.lineHeight),
     '--paragraph-spacing': `${settings.paragraphSpacing}px`,
@@ -5058,20 +5065,6 @@ function SettingsModal({
               </select>
             </label>
             <label>
-              읽기 글자 굵기
-              <select
-                value={String(settings.fontWeight)}
-                onChange={(event) =>
-                  onUpdate({ fontWeight: Number(event.currentTarget.value) })
-                }
-              >
-                <option value="300">얇게</option>
-                <option value="400">보통</option>
-                <option value="500">약간 굵게</option>
-                <option value="700">굵게</option>
-              </select>
-            </label>
-            <label>
               글자 크기 {settings.fontSize}px
               <input
                 type="range"
@@ -5080,6 +5073,26 @@ function SettingsModal({
                 value={settings.fontSize}
                 onChange={(event) =>
                   onUpdate({ fontSize: Number(event.currentTarget.value) })
+                }
+              />
+            </label>
+            <label>
+              글자 굵기 보정{' '}
+              {settings.fontWeightBoost === 0
+                ? '0'
+                : `+${settings.fontWeightBoost.toFixed(1)}`}
+              <input
+                type="range"
+                min={0}
+                max={0.4}
+                step={0.1}
+                value={settings.fontWeightBoost}
+                onChange={(event) =>
+                  onUpdate({
+                    fontWeightBoost: normalizeFontWeightBoost(
+                      Number(event.currentTarget.value),
+                    ),
+                  })
                 }
               />
             </label>

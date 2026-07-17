@@ -1495,7 +1495,7 @@ input[type='checkbox']:focus-visible {
   font-size: var(--reader-font-size);
   line-height: var(--reader-line-height);
   color: var(--ink);
-  font-synthesis: style;
+  font-synthesis: weight style;
   word-break: break-word;
 }
 .markdown-body > * {
