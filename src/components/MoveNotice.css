@@ -1,0 +1,13 @@
+.move-notice { box-sizing: border-box; width: min(460px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; padding: 30px; border: 1px solid #e3dcd5; border-radius: 22px; background: #fffdf9; color: #393632; box-shadow: 0 20px 70px #0003; font-family: inherit; }
+.move-notice::backdrop { background: #221f1b80; backdrop-filter: blur(3px); }
+.move-notice-label { color: #987e71; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+.move-notice h2 { margin: 12px 0 18px; font-size: 23px; line-height: 1.4; word-break: keep-all; }
+.move-notice p { margin: 10px 0; color: #68625c; font-size: 14px; line-height: 1.8; word-break: keep-all; overflow-wrap: anywhere; }
+.move-notice-links { display: grid; gap: 10px; margin: 22px 0; }
+.move-notice-links a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; min-height: 44px; box-sizing: border-box; border: 1px solid #ded4ca; border-radius: 12px; background: #f4eee7; color: #51453d; text-decoration: none; font-size: 15px; font-weight: 600; }
+.move-notice-links a:hover { background: #eae0d6; }
+.move-notice .move-notice-timing { font-size: 12px; }
+.move-notice form { margin-top: 20px; }
+.move-notice button { width: 100%; min-height: 44px; padding: 12px; border: 1px solid #dfd8d0; border-radius: 12px; background: #fffdf9; color: #51453d; font: inherit; font-size: 14px; cursor: pointer; }
+.move-notice :is(a,button):focus-visible { outline: 2px solid #947362; outline-offset: 3px; }
+@media (max-width: 420px) { .move-notice { padding: 24px; } .move-notice h2 { font-size: 21px; } }
